@@ -383,7 +383,7 @@ if st.session_state.step == 1:
             recipes_json = json.dumps(slim_recipes)
             
             system_instruction = f'''You are an intelligent, agentic meal planner.
-You have access to the user's available inventory:
+You have access to the user's available inventory of seasonal vegetables from a weekly delivery:
 {inventory}
 
 And the following constraints:
@@ -392,8 +392,9 @@ And the following constraints:
 - Other Nutrition constraints: {nutrition_info}
 
 Your task:
-Output a 5-day weekday meal plan (Monday to Friday). 
-You MUST output STRICT valid JSON and NOTHING ELSE. No markdown formatting blocks around it.
+- Output a 5-day weekday meal plan (Monday to Friday). 
+- Please prioritise recipes that make best use of the vegetables in the inventory, but please also suggest recipes that use meats and other ingredients that are not in the inventory.
+- You MUST output STRICT valid JSON and NOTHING ELSE. No markdown formatting blocks around it.
 
 Format exactly like this list of objects:
 [
@@ -474,10 +475,19 @@ elif st.session_state.step == 2:
                                 filtered_recipes = filter_recipes(all_recipes, inventory, max_recipes=150)
                                 slim_recipes = [{"uid": r["uid"], "name": r["name"]} for r in filtered_recipes]
                                 
+                                # All UIDs already scheduled this week (including the one being replaced)
+                                scheduled_uids = [
+                                    p.get("recipe_uid", "")
+                                    for p in st.session_state.meal_plan
+                                    if p.get("recipe_uid")
+                                ]
+                                excluded_uids_str = ", ".join(f"'{u}'" for u in scheduled_uids)
+
                                 replace_prompt = f"""
                                 The user rejected the recipe '{recipe['name']}' for {day}.
                                 Inventory limits: {inventory}. Constraints: {guidance}.
-                                Pick ONE new recipe from the JSON list. EXCLUDE uid '{uid}'.
+                                Pick ONE new recipe from the JSON list.
+                                EXCLUDE ALL of these UIDs (already used this week): {excluded_uids_str}.
                                 Return ONLY one JSON object: {{"day": "{day}", "recipe_uid": "...", "reasoning": "..."}}
                                 """
                                 
