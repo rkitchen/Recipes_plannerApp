@@ -12,6 +12,15 @@ except ImportError:
     pass
 from google import genai
 from google.genai import types
+from typing import Optional, List
+
+# Optional Firebase imports (only needed when FIREBASE_* secrets are set)
+try:
+    import firebase_admin
+    from firebase_admin import credentials, firestore as fb_firestore
+    FIREBASE_AVAILABLE = True
+except ImportError:
+    FIREBASE_AVAILABLE = False
 
 # Set page config FIRST
 st.set_page_config(page_title="Magic Meal Planner", page_icon="🍽️", layout="wide")
@@ -105,58 +114,150 @@ if 'meal_plan' not in st.session_state:
 if 'photos_analyzed' not in st.session_state:
     st.session_state.photos_analyzed = False
 
-# --- Data Handling ---
-@st.cache_data(show_spinner=False)
-def load_recipes(data_dir="Data"):
+# ---------------------------------------------------------------------------
+# Firestore client (singleton via firebase-admin)
+# ---------------------------------------------------------------------------
+def _get_firestore_client():
+    """Initialise Firebase app once and return a Firestore client.
+    Reads credentials from st.secrets['firebase'] (a TOML table).
     """
-    Parse local .paprikarecipes minimally.
-    DO NOT load photo_data into memory here to save RAM!
+    if not FIREBASE_AVAILABLE:
+        return None
+    try:
+        sa_info = dict(st.secrets["firebase"])  # TOML table → dict
+        if not firebase_admin._apps:
+            cred = credentials.Certificate(sa_info)
+            firebase_admin.initialize_app(cred)
+        return fb_firestore.client()
+    except Exception:
+        return None
+
+
+# ---------------------------------------------------------------------------
+# Recipe loading: Firestore (primary) → local .paprikarecipes (fallback)
+# ---------------------------------------------------------------------------
+@st.cache_data(ttl=3600, show_spinner=False)
+def load_recipes_from_firestore() -> List[dict]:
+    """Pull recipe metadata from Firestore — photo_data intentionally excluded.
+    Uses a field mask (.select) so only lightweight fields are transferred.
+    Cached for 1 hour to avoid repeated reads on every UI interaction.
+    """
+    db = _get_firestore_client()
+    if db is None:
+        return []
+
+    # Field mask: only the fields the app actually uses
+    fields = ["uid", "name", "ingredients",
+              "nutritional_info", "prep_time", "cook_time", "source_url"]
+    docs = db.collection("recipes").select(fields).stream()
+
+    recipes = []
+    for doc in docs:
+        r = doc.to_dict()
+        if not r:
+            continue
+        recipes.append({
+            "uid":           r.get("uid", doc.id),
+            "name":          r.get("name", "Unknown"),
+            "ingredients":   r.get("ingredients", ""),
+            "nutrition_info": r.get("nutritional_info", ""),
+            "prep_time":     r.get("prep_time", ""),
+            "cook_time":     r.get("cook_time", ""),
+            "source_url":    r.get("source_url", ""),
+            # photo_data is NOT included here — fetched lazily per recipe
+            "_source":       "firestore",
+        })
+    return recipes
+
+
+@st.cache_data(show_spinner=False)
+def get_recipe_image_from_firestore(uid: str) -> Optional[str]:
+    """Fetch ONLY the photo_data field for a single recipe document.
+    Cached indefinitely (images don't change) to avoid repeat reads.
+    """
+    db = _get_firestore_client()
+    if db is None:
+        return None
+    try:
+        doc = db.collection("recipes").document(uid).get(field_paths=["photo_data"])
+        if doc.exists:
+            return doc.to_dict().get("photo_data") or None
+    except Exception:
+        pass
+    return None
+
+
+@st.cache_data(show_spinner=False)
+def load_recipes_from_local(data_dir: str = "Data") -> List[dict]:
+    """Fallback: parse local .paprikarecipes archives.
+    photo_data is intentionally excluded here to save RAM; images are
+    fetched lazily by get_recipe_image().
     """
     if not os.path.exists(data_dir):
         return []
-    
+
     recipes = []
     for filename in os.listdir(data_dir):
         path = os.path.join(data_dir, filename)
-        if filename.endswith(".paprikarecipes"):
-            with zipfile.ZipFile(path, 'r') as zf:
-                for name in zf.namelist():
-                    if name.endswith(".paprikarecipe"):
-                        try:
-                            compressed_data = zf.read(name)
-                            json_data = gzip.decompress(compressed_data).decode('utf-8')
-                            recipe = json.loads(json_data)
-                            
-                            # Note: intentionally skipping 'photo_data'
-                            recipes.append({
-                                "uid": recipe.get('uid', name),
-                                "name": recipe.get('name', 'Unknown'),
-                                "ingredients": recipe.get('ingredients', ''),
-                                "directions": recipe.get('directions', ''),
-                                "nutrition_info": recipe.get('nutritional_info', ''),
-                                "prep_time": recipe.get('prep_time', ''),
-                                "cook_time": recipe.get('cook_time', ''),
-                                "source_url": recipe.get('source_url', ''),
-                                "archive_path": path,
-                                "inner_path": name
-                            })
-                        except Exception as e:
-                            pass
+        if not filename.endswith(".paprikarecipes"):
+            continue
+        with zipfile.ZipFile(path, "r") as zf:
+            for name in zf.namelist():
+                if not name.endswith(".paprikarecipe"):
+                    continue
+                try:
+                    compressed_data = zf.read(name)
+                    recipe = json.loads(gzip.decompress(compressed_data).decode("utf-8"))
+                    recipes.append({
+                        "uid":          recipe.get("uid", name),
+                        "name":         recipe.get("name", "Unknown"),
+                        "ingredients":  recipe.get("ingredients", ""),
+                        "nutrition_info": recipe.get("nutritional_info", ""),
+                        "prep_time":    recipe.get("prep_time", ""),
+                        "cook_time":    recipe.get("cook_time", ""),
+                        "source_url":   recipe.get("source_url", ""),
+                        "photo_data":   "",   # loaded lazily via get_recipe_image
+                        "archive_path": path,
+                        "inner_path":   name,
+                        "_source":      "local",
+                    })
+                except Exception:
+                    pass
     return recipes
 
+
+def load_recipes() -> List[dict]:
+    """Auto-selects Firestore if credentials exist, else falls back to local files."""
+    firestore_recipes = load_recipes_from_firestore()
+    if firestore_recipes:
+        return firestore_recipes
+    return load_recipes_from_local()
+
+
 @st.cache_data(show_spinner=False)
-def get_recipe_image(archive_path, inner_path):
-    """Lazily load the base64 image data from a specific .paprikarecipe inside the archive!"""
+def get_recipe_image(recipe_uid: str, archive_path: str = "",
+                     inner_path: str = "") -> Optional[str]:
+    """Returns a base64 image string for a recipe, regardless of backend.
+    Lazy: called only for the 5 recipes shown on the meal plan page.
+
+    - Firestore backend: fetches only photo_data for this one document.
+    - Local backend: cracks open the zip archive for this one entry.
+    """
+    # Firestore path — single-document, single-field fetch
+    if not archive_path:
+        return get_recipe_image_from_firestore(recipe_uid)
+
+    # Local zip path
     try:
-        with zipfile.ZipFile(archive_path, 'r') as zf:
+        with zipfile.ZipFile(archive_path, "r") as zf:
             compressed_data = zf.read(inner_path)
-            json_data = gzip.decompress(compressed_data).decode('utf-8')
-            recipe = json.loads(json_data)
-            if 'photo_data' in recipe and recipe['photo_data']:
-                return recipe['photo_data']
-    except:
+            recipe = json.loads(gzip.decompress(compressed_data).decode("utf-8"))
+            return recipe.get("photo_data") or None
+    except Exception:
         pass
+
     return None
+
 
 def filter_recipes(recipes, available_ingredients, max_recipes=150):
     if len(recipes) <= max_recipes:
@@ -343,8 +444,13 @@ elif st.session_state.step == 2:
             
             if recipe:
                 with col1:
-                    # Lazily fetch the image just for this exact recipe!
-                    b64_image = get_recipe_image(recipe['archive_path'], recipe['inner_path'])
+                    # Lazy: fetches only this recipe's photo_data from
+                    # Firestore (single-field read) or local zip archive
+                    b64_image = get_recipe_image(
+                        recipe_uid=recipe["uid"],
+                        archive_path=recipe.get("archive_path", ""),
+                        inner_path=recipe.get("inner_path", ""),
+                    )
                     if b64_image:
                         image_data = base64.b64decode(b64_image)
                         st.image(image_data, use_container_width=True)
