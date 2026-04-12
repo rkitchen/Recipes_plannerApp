@@ -5,7 +5,7 @@ import gzip
 import json
 import re
 import base64
-import datetime
+from datetime import datetime, timedelta
 from PIL import Image
 try:
     from io import BytesIO
@@ -13,7 +13,7 @@ except ImportError:
     pass
 from google import genai
 from google.genai import types
-from typing import Optional, List
+from typing import Optional, List, Tuple
 
 # Optional Firebase imports (only needed when FIREBASE_* secrets are set)
 try:
@@ -26,8 +26,9 @@ except ImportError:
 # Set page config FIRST
 st.set_page_config(page_title="Magic Meal Planner", page_icon="🍽️", layout="wide")
 
+
 # ---------------------------------------------------------------------------
-# Password Gate — must run before ANYTHING else in the script
+# Password Gate
 # ---------------------------------------------------------------------------
 def _check_password() -> bool:
     """Returns True only if the user has already authenticated this session."""
@@ -37,7 +38,7 @@ def _check_password() -> bool:
     try:
         app_password = st.secrets["APP_PASSWORD"]
     except (KeyError, Exception):
-        return True  # No password configured — open access
+        return True
 
     st.markdown(
         "<h2 style='text-align:center; margin-top: 20vh;'>🍽️ Meal Planner</h2>"
@@ -48,7 +49,7 @@ def _check_password() -> bool:
     with col:
         entered = st.text_input("Password", type="password", label_visibility="collapsed",
                                 placeholder="Enter password…")
-        if st.button("Unlock →", width="stretch"):
+        if st.button("Unlock →", use_container_width=True):
             if entered == app_password:
                 st.session_state.authenticated = True
                 st.rerun()
@@ -58,6 +59,7 @@ def _check_password() -> bool:
     return False
 
 _check_password()
+
 
 # ---------------------------------------------------------------------------
 # CSS
@@ -94,17 +96,46 @@ div[data-baseweb="file-uploader"]:hover {
 }
 .stButton > button:hover { transform: translateY(-2px) scale(1.02); box-shadow: 0 8px 25px rgba(244, 63, 94, 0.4); }
 .stButton > button:active { transform: translateY(1px); }
+
+/* Compact date carousel buttons */
+.carousel-btn button { padding: 0.25rem 0.5rem; font-size: 1rem; }
 </style>
 ''', unsafe_allow_html=True)
 
 
 # ---------------------------------------------------------------------------
+# Time logic helpers
+# ---------------------------------------------------------------------------
+def get_target_week() -> str:
+    """
+    Mon-Fri: returns this week's Monday.
+    Sat-Sun: returns next week's Monday.
+    Returned as YYYY-MM-DD string.
+    """
+    today = datetime.now()
+    if today.weekday() >= 5:  # 5=Sat, 6=Sun
+        days_ahead = 7 - today.weekday() 
+        target = today + timedelta(days=days_ahead)
+    else:
+        target = today - timedelta(days=today.weekday())
+    return target.strftime("%Y-%m-%d")
+
+
+def shift_week(current_monday_str: str, weeks: int) -> str:
+    """Shift a YYYY-MM-DD date by N weeks."""
+    dt = datetime.strptime(current_monday_str, "%Y-%m-%d")
+    new_dt = dt + timedelta(weeks=weeks)
+    return new_dt.strftime("%Y-%m-%d")
+
+
+# ---------------------------------------------------------------------------
 # Session State Defaults
 # ---------------------------------------------------------------------------
+if "viewed_monday" not in st.session_state:
+    st.session_state.viewed_monday = get_target_week()
+
 for key, default in [
-    ("step", 1),
     ("parsed_ingredients", ""),
-    ("meal_plan", []),
     ("photos_analyzed", False),
     ("current_user", None),
     ("user_profile", {"liked": [], "disliked": [], "preferences": {}}),
@@ -114,10 +145,26 @@ for key, default in [
 
 
 # ---------------------------------------------------------------------------
+# API Setup
+# ---------------------------------------------------------------------------
+api_key = ""
+try:
+    api_key = st.secrets.get("GEMINI_API_KEY", os.environ.get("GEMINI_API_KEY", ""))
+except Exception:
+    api_key = os.environ.get("GEMINI_API_KEY", "")
+
+client = None
+if api_key and api_key != "YOUR_API_KEY_HERE":
+    try:
+        client = genai.Client(api_key=api_key)
+    except Exception:
+        pass
+
+
+# ---------------------------------------------------------------------------
 # Firestore client (singleton)
 # ---------------------------------------------------------------------------
 def _get_db():
-    """Returns a Firestore client or None if Firebase is unavailable."""
     if not FIREBASE_AVAILABLE:
         st.error("Firebase SDK not installed — run: uv pip install firebase-admin")
         return None
@@ -133,21 +180,19 @@ def _get_db():
 
 
 # ---------------------------------------------------------------------------
-# User profile helpers
+# Firestore operations
 # ---------------------------------------------------------------------------
 def get_user_profile(user_id: str) -> dict:
-    """Fetch user doc (liked/disliked/preferences). Never cached — must be live."""
     db = _get_db()
     empty = {"liked": [], "disliked": [], "preferences": {}}
-    if db is None or not user_id:
-        return empty
+    if db is None or not user_id: return empty
     try:
         doc = db.collection("users").document(user_id).get()
         if doc.exists:
             d = doc.to_dict()
             return {
-                "liked":       d.get("liked_recipes", []),
-                "disliked":    d.get("disliked_recipes", []),
+                "liked": d.get("liked_recipes", []),
+                "disliked": d.get("disliked_recipes", []),
                 "preferences": d.get("preferences", {}),
             }
         return empty
@@ -156,317 +201,156 @@ def get_user_profile(user_id: str) -> dict:
 
 
 def save_user_preferences(user_id: str, prefs: dict):
-    """Write the preferences sub-dict to the user's Firestore doc."""
     db = _get_db()
-    if db is None or not user_id:
-        return
-    try:
-        db.collection("users").document(user_id).set({"preferences": prefs}, merge=True)
-    except Exception as e:
-        st.error(f"Could not save preferences: {e}")
+    if db is None or not user_id: return
+    db.collection("users").document(user_id).set({"preferences": prefs}, merge=True)
 
 
 def update_recipe_rating(user_id: str, recipe_uid: str, rating_type: str):
-    """
-    Toggle a recipe rating for a user.
-    rating_type: 'like' | 'dislike' | 'remove_like' | 'remove_dislike'
-    """
     db = _get_db()
-    if db is None:
-        st.error("Cannot rate: Firestore unavailable.")
-        return
-    if not user_id:
-        st.error("Cannot rate: no user selected.")
-        return
+    if db is None or not user_id: return
     try:
         ref = db.collection("users").document(user_id)
         ArrayUnion  = fb_firestore.ArrayUnion
         ArrayRemove = fb_firestore.ArrayRemove
         if rating_type == "like":
-            ref.set({"liked_recipes":    ArrayUnion([recipe_uid]),
-                     "disliked_recipes": ArrayRemove([recipe_uid])}, merge=True)
+            ref.set({"liked_recipes": ArrayUnion([recipe_uid]), "disliked_recipes": ArrayRemove([recipe_uid])}, merge=True)
         elif rating_type == "dislike":
-            ref.set({"disliked_recipes": ArrayUnion([recipe_uid]),
-                     "liked_recipes":    ArrayRemove([recipe_uid])}, merge=True)
+            ref.set({"disliked_recipes": ArrayUnion([recipe_uid]), "liked_recipes": ArrayRemove([recipe_uid])}, merge=True)
         elif rating_type == "remove_like":
             ref.set({"liked_recipes": ArrayRemove([recipe_uid])}, merge=True)
         elif rating_type == "remove_dislike":
             ref.set({"disliked_recipes": ArrayRemove([recipe_uid])}, merge=True)
-        # Refresh session state
         st.session_state.user_profile = get_user_profile(user_id)
     except Exception as e:
         st.error(f"Rating update failed: {e}")
 
 
-# ---------------------------------------------------------------------------
-# Meal plan persistence
-# ---------------------------------------------------------------------------
-def save_meal_plan(user_id: str, plan_data: list):
-    """Write a new meal plan document to Firestore."""
+def get_meal_plan_for_week(user_id: str, week_start_str: str) -> Tuple[Optional[str], list, str]:
+    """Returns (document_id, plan_data_list, inventory_string)"""
     db = _get_db()
-    if db is None or not user_id:
-        return
-    try:
-        db.collection("meal_plans").add({
-            "user_id":   user_id,
-            "datestamp": fb_firestore.SERVER_TIMESTAMP,
-            "plan_data": plan_data,
-        })
-    except Exception as e:
-        st.warning(f"Could not save meal plan to history: {e}")
-
-
-def get_meal_plan_history(user_id: str, limit: int = 8) -> list:
-    """Query meal_plans for this user, ordered newest first."""
-    db = _get_db()
-    if db is None or not user_id:
-        return []
+    if db is None or not user_id: return None, [], ""
     try:
         docs = (db.collection("meal_plans")
                   .where(filter=fb_firestore.FieldFilter("user_id", "==", user_id))
-                  .order_by("datestamp", direction="DESCENDING")
-                  .limit(limit)
+                  .where(filter=fb_firestore.FieldFilter("week_start", "==", week_start_str))
+                  .limit(1)
                   .stream())
-        return [d.to_dict() for d in docs if d.to_dict()]
+        for doc in docs:
+            d = doc.to_dict()
+            return doc.id, d.get("plan_data", []), d.get("inventory", "")
     except Exception:
-        return []
+        pass
+    return None, [], ""
+
+
+def save_meal_plan(user_id: str, week_start: str, inventory: str, plan_data: list):
+    db = _get_db()
+    if db is None or not user_id: return
+    db.collection("meal_plans").add({
+        "user_id": user_id,
+        "datestamp": fb_firestore.SERVER_TIMESTAMP,
+        "week_start": week_start,
+        "inventory": inventory,
+        "plan_data": plan_data,
+    })
+
+
+def update_meal_plan_in_db(doc_id: str, new_plan_data: list):
+    """Overwrite the plan_data array for an existing meal plan document."""
+    db = _get_db()
+    if db is None or not doc_id: return
+    db.collection("meal_plans").document(doc_id).update({
+        "plan_data": new_plan_data,
+        "datestamp": fb_firestore.SERVER_TIMESTAMP, # Bumps modified time
+    })
 
 
 # ---------------------------------------------------------------------------
-# Recipe loading: Firestore (primary) → local .paprikarecipes (fallback)
+# Recipe local/cloud loading & filtering (unchanged)
 # ---------------------------------------------------------------------------
 @st.cache_data(ttl=3600, show_spinner=False)
 def load_recipes_from_firestore() -> List[dict]:
     db = _get_db()
-    if db is None:
-        return []
-    fields = ["uid", "name", "ingredients", "nutritional_info",
-              "prep_time", "cook_time", "source_url"]
+    if db is None: return []
+    fields = ["uid", "name", "ingredients", "nutritional_info", "prep_time", "cook_time", "source_url"]
     docs = db.collection("recipes").select(fields).stream()
     recipes = []
     for doc in docs:
         r = doc.to_dict()
-        if not r:
-            continue
+        if not r: continue
         recipes.append({
-            "uid":           r.get("uid", doc.id),
-            "name":          r.get("name", "Unknown"),
-            "ingredients":   r.get("ingredients", ""),
-            "nutrition_info": r.get("nutritional_info", ""),
-            "prep_time":     r.get("prep_time", ""),
-            "cook_time":     r.get("cook_time", ""),
-            "source_url":    r.get("source_url", ""),
-            "_source":       "firestore",
+            "uid": r.get("uid", doc.id), "name": r.get("name", "Unknown"), 
+            "ingredients": r.get("ingredients", ""), "nutrition_info": r.get("nutritional_info", ""),
+            "prep_time": r.get("prep_time", ""), "cook_time": r.get("cook_time", ""),
+            "source_url": r.get("source_url", ""), "_source": "firestore",
         })
     return recipes
-
 
 @st.cache_data(show_spinner=False)
 def get_recipe_image_from_firestore(uid: str) -> Optional[str]:
     db = _get_db()
-    if db is None:
-        return None
+    if db is None: return None
     try:
         doc = db.collection("recipes").document(uid).get(field_paths=["photo_data"])
-        if doc.exists:
-            return doc.to_dict().get("photo_data") or None
-    except Exception:
-        pass
+        if doc.exists: return doc.to_dict().get("photo_data") or None
+    except Exception: pass
     return None
-
 
 @st.cache_data(show_spinner=False)
 def load_recipes_from_local(data_dir: str = "Data") -> List[dict]:
-    if not os.path.exists(data_dir):
-        return []
+    if not os.path.exists(data_dir): return []
     recipes = []
     for filename in os.listdir(data_dir):
         path = os.path.join(data_dir, filename)
-        if not filename.endswith(".paprikarecipes"):
-            continue
+        if not filename.endswith(".paprikarecipes"): continue
         with zipfile.ZipFile(path, "r") as zf:
             for name in zf.namelist():
-                if not name.endswith(".paprikarecipe"):
-                    continue
+                if not name.endswith(".paprikarecipe"): continue
                 try:
                     compressed_data = zf.read(name)
-                    recipe = json.loads(gzip.decompress(compressed_data).decode("utf-8"))
+                    r = json.loads(gzip.decompress(compressed_data).decode("utf-8"))
                     recipes.append({
-                        "uid":          recipe.get("uid", name),
-                        "name":         recipe.get("name", "Unknown"),
-                        "ingredients":  recipe.get("ingredients", ""),
-                        "nutrition_info": recipe.get("nutritional_info", ""),
-                        "prep_time":    recipe.get("prep_time", ""),
-                        "cook_time":    recipe.get("cook_time", ""),
-                        "source_url":   recipe.get("source_url", ""),
-                        "archive_path": path,
-                        "inner_path":   name,
-                        "_source":      "local",
+                        "uid": r.get("uid", name), "name": r.get("name", "Unknown"),
+                        "ingredients": r.get("ingredients", ""), "nutrition_info": r.get("nutritional_info", ""),
+                        "prep_time": r.get("prep_time", ""), "cook_time": r.get("cook_time", ""),
+                        "source_url": r.get("source_url", ""), "archive_path": path, "inner_path": name, "_source": "local",
                     })
-                except Exception:
-                    pass
+                except Exception: pass
     return recipes
 
-
 def load_recipes() -> List[dict]:
-    firestore_recipes = load_recipes_from_firestore()
-    if firestore_recipes:
-        return firestore_recipes
+    fr = load_recipes_from_firestore()
+    if fr: return fr
     return load_recipes_from_local()
 
-
 @st.cache_data(show_spinner=False)
-def get_recipe_image(recipe_uid: str, archive_path: str = "",
-                     inner_path: str = "") -> Optional[str]:
-    if not archive_path:
-        return get_recipe_image_from_firestore(recipe_uid)
+def get_recipe_image(recipe_uid: str, archive_path: str = "", inner_path: str = "") -> Optional[str]:
+    if not archive_path: return get_recipe_image_from_firestore(recipe_uid)
     try:
         with zipfile.ZipFile(archive_path, "r") as zf:
-            compressed_data = zf.read(inner_path)
-            recipe = json.loads(gzip.decompress(compressed_data).decode("utf-8"))
-            return recipe.get("photo_data") or None
-    except Exception:
-        pass
+            cd = zf.read(inner_path)
+            return json.loads(gzip.decompress(cd).decode("utf-8")).get("photo_data") or None
+    except Exception: pass
     return None
 
-
-def filter_recipes(recipes: List[dict], available_ingredients: str,
-                   max_recipes: int = 150) -> List[dict]:
-    if len(recipes) <= max_recipes:
-        return recipes
+def filter_recipes(recipes: List[dict], available_ingredients: str, max_recipes: int = 150) -> List[dict]:
+    if len(recipes) <= max_recipes: return recipes
     avail_words = set(re.findall(r'\w+', available_ingredients.lower()))
     scored = []
     for r in recipes:
-        score = sum(1 for w in avail_words
-                    if len(w) > 3 and (w in r['ingredients'].lower() or w in r['name'].lower()))
+        score = sum(1 for w in avail_words if len(w) > 3 and (w in r['ingredients'].lower() or w in r['name'].lower()))
         scored.append((score, r))
     scored.sort(key=lambda x: x[0], reverse=True)
     return [r for _, r in scored[:max_recipes]]
 
 
 # ---------------------------------------------------------------------------
-# Shared UI component: recipe card with rating buttons
-# ---------------------------------------------------------------------------
-def render_recipe_card(recipe: dict, reason: str, idx: int, card_key_prefix: str,
-                       show_replace: bool = True, all_recipes: Optional[List[dict]] = None,
-                       client=None, pantry_staples: Optional[List[str]] = None,
-                       meal_type: str = "Main Only", calories_goal: int = 2000,
-                       nutrition_info: str = ""):
-    """Render a recipe card with image, title, rating buttons, and optional replacer."""
-    user_id = st.session_state.get("current_user", "")
-    profile = st.session_state.get("user_profile", {"liked": [], "disliked": []})
-    liked_uids    = profile.get("liked", [])
-    disliked_uids = profile.get("disliked", [])
-
-    uid = recipe.get("uid", "")
-
-    with st.container(border=True):
-        col_img, col_info = st.columns([1, 4])
-
-        with col_img:
-            b64_image = get_recipe_image(
-                recipe_uid=uid,
-                archive_path=recipe.get("archive_path", ""),
-                inner_path=recipe.get("inner_path", ""),
-            )
-            if b64_image:
-                st.image(base64.b64decode(b64_image), width="stretch")
-            else:
-                st.caption("No photo")
-
-        with col_info:
-            # Title
-            if recipe.get("source_url"):
-                st.markdown(f"### [{recipe['name']}]({recipe['source_url']})")
-            else:
-                st.subheader(recipe["name"])
-
-            st.caption(f"⏱️ Prep: {recipe.get('prep_time','N/A')}m | Cook: {recipe.get('cook_time','N/A')}m")
-            if reason:
-                st.write(f"**Why this?** {reason}")
-
-            # Rating buttons
-            is_liked    = uid in liked_uids
-            is_disliked = uid in disliked_uids
-            r_col1, r_col2, r_col3 = st.columns([1, 1, 8])
-            with r_col1:
-                liked_label = "✅" if is_liked else "👍"
-                if st.button(liked_label, key=f"{card_key_prefix}_like_{uid}_{idx}",
-                             help="Like this recipe"):
-                    action = "remove_like" if is_liked else "like"
-                    update_recipe_rating(user_id, uid, action)
-                    st.rerun()
-            with r_col2:
-                disliked_label = "❌" if is_disliked else "👎"
-                if st.button(disliked_label, key=f"{card_key_prefix}_dislike_{uid}_{idx}",
-                             help="Dislike this recipe"):
-                    action = "remove_dislike" if is_disliked else "dislike"
-                    update_recipe_rating(user_id, uid, action)
-                    st.rerun()
-
-            # Replacer (only on active plan)
-            if show_replace and all_recipes and client:
-                with st.expander("🔀 Replace this meal..."):
-                    guidance = st.text_input(
-                        "Guidance (e.g., 'Make it vegetarian'):",
-                        key=f"{card_key_prefix}_guidance_{uid}_{idx}")
-                    if st.button("Generate Alternative",
-                                 key=f"{card_key_prefix}_replace_{uid}_{idx}"):
-                        with st.spinner("Finding an alternative..."):
-                            inventory = (f"Fresh: {st.session_state.parsed_ingredients}\n"
-                                         f"Staples: {', '.join(pantry_staples or [])}")
-                            filtered = filter_recipes(all_recipes, inventory, max_recipes=150)
-                            # Exclude the entire current week + disliked
-                            scheduled_uids = [p.get("recipe_uid", "")
-                                              for p in st.session_state.meal_plan]
-                            excluded = set(scheduled_uids) | set(disliked_uids)
-                            excluded_str = ", ".join(f"'{u}'" for u in excluded)
-                            slim = [{"uid": r["uid"], "name": r["name"]}
-                                    for r in filtered if r["uid"] not in excluded]
-                            replace_prompt = (
-                                f"The user rejected '{recipe['name']}' for this meal slot.\n"
-                                f"Inventory: {inventory}. Constraints: {guidance}.\n"
-                                f"EXCLUDE ALL of these UIDs: {excluded_str}.\n"
-                                f"Return ONLY one JSON object: "
-                                f'{{ "day": "{recipe.get("_day","")}", '
-                                f'"recipe_uid": "...", "reasoning": "..." }}'
-                            )
-                            try:
-                                resp = client.models.generate_content(
-                                    model="gemini-2.5-pro",
-                                    contents=[replace_prompt, json.dumps(slim)]
-                                )
-                                r_text = resp.text.strip()
-                                if r_text.startswith("```json"):
-                                    r_text = r_text[7:-3]
-                                elif r_text.startswith("```"):
-                                    r_text = r_text[3:-3]
-                                new_plan = json.loads(r_text.strip())
-                                st.session_state.meal_plan[idx] = new_plan
-                                st.rerun()
-                            except Exception as e:
-                                st.error(f"Failed to find alternative: {e}")
-
-
-# ---------------------------------------------------------------------------
-# API setup
-# ---------------------------------------------------------------------------
-api_key = ""
-try:
-    api_key = st.secrets.get("GEMINI_API_KEY", os.environ.get("GEMINI_API_KEY", ""))
-except Exception:
-    api_key = os.environ.get("GEMINI_API_KEY", "")
-
-
-# ---------------------------------------------------------------------------
-# Sidebar
+# Sidebar Identity
 # ---------------------------------------------------------------------------
 st.sidebar.title("⚙️ Settings")
 
-# --- User selector (from secrets.toml [users] table) ---
 try:
-    # secrets.toml format: user_id = "Display Name"
-    # e.g.  user_becky = "Becky"
     id_to_name = dict(st.secrets["users"])
     name_to_id = {v: k for k, v in id_to_name.items()}
 except Exception:
@@ -475,353 +359,330 @@ except Exception:
 selected_name = st.sidebar.selectbox("👤 User", list(name_to_id.keys()))
 new_user_id   = name_to_id[selected_name]
 
-# Switch user — reset plan and reload profile
 if st.session_state.current_user != new_user_id:
-    st.session_state.current_user    = new_user_id
-    st.session_state.step            = 1
-    st.session_state.meal_plan       = []
-    st.session_state.parsed_ingredients = ""
-    st.session_state.photos_analyzed = False
-    st.session_state.user_profile    = get_user_profile(new_user_id)
+    st.session_state.current_user = new_user_id
+    st.session_state.user_profile = get_user_profile(new_user_id)
+    st.session_state.viewed_monday = get_target_week() # Reset to current week on change
     st.rerun()
 
-# Ensure profile is loaded (first run after auth)
+# Ensure profile is fully loaded loaded
 if not st.session_state.user_profile.get("liked") and not st.session_state.user_profile.get("disliked"):
-    profile_check = get_user_profile(st.session_state.current_user)
-    if profile_check != st.session_state.user_profile:
-        st.session_state.user_profile = profile_check
+    st.session_state.user_profile = get_user_profile(st.session_state.current_user)
 
-# Sidebar shows persisted preferences (read-only — editing in Profile tab)
 prefs = st.session_state.user_profile.get("preferences", {})
 meal_type     = prefs.get("meal_type", "Main Only")
 calories_goal = prefs.get("calories_goal", 2000)
-nutrition_info = prefs.get("nutrition_info", "")
-pantry_staples_str = prefs.get("pantry_staples",
-    "olive oil, salt, black pepper, all-purpose flour, butter, garlic, onions, "
-    "soy sauce, sugar, dried oregano, dried basil, cumin, water, vinegar, rice")
+nutrition_info= prefs.get("nutrition_info", "")
+pantry_staples_str = prefs.get("pantry_staples", 
+    "olive oil, salt, black pepper, all-purpose flour, butter, garlic, onions, soy sauce, sugar, dried oregano, dried basil, cumin, water, vinegar, rice")
 pantry_staples = [s.strip() for s in pantry_staples_str.split(",") if s.strip()]
 
 st.sidebar.markdown("---")
 st.sidebar.caption(f"**Meal structure:** {meal_type}")
 st.sidebar.caption(f"**Calories/day:** {calories_goal} kcal")
-if nutrition_info:
-    st.sidebar.caption(f"**Constraints:** {nutrition_info}")
-
-if st.sidebar.button("🔄 Start New Plan"):
-    st.session_state.step = 1
-    st.session_state.meal_plan = []
-    st.session_state.parsed_ingredients = ""
-    st.session_state.photos_analyzed = False
-    st.rerun()
-
-st.sidebar.markdown("---")
+if nutrition_info: st.sidebar.caption(f"**Constraints:** {nutrition_info}")
 
 if not api_key or api_key == "YOUR_API_KEY_HERE":
     st.sidebar.error("⚠️ API Key not found in `.streamlit/secrets.toml`!")
 
 
 # ---------------------------------------------------------------------------
-# Main app
+# The Popup Planner Dialog
 # ---------------------------------------------------------------------------
-st.title("✨ Intelligent Agentic Meal Planner")
-
-if not api_key or api_key == "YOUR_API_KEY_HERE":
-    st.warning("🔒 Please configure your Gemini API key in `.streamlit/secrets.toml`.")
-    st.stop()
-
-try:
-    client = genai.Client(api_key=api_key)
-except Exception as e:
-    st.error(f"Failed to load API client: {e}")
-    st.stop()
-
-
-# ============================================================
-# STEP 1 — Inventory & photo parsing
-# ============================================================
-if st.session_state.step == 1:
-    st.markdown("### Step 1: Tell us what you have!")
-
+@st.dialog("🪄 Plan Menu for the Week")
+def plan_week_dialog(monday_date_str: str, all_recipes: List[dict]):
+    st.write(f"Generating a menu for the week starting **{monday_date_str}**.")
+    
     col1, col2 = st.columns([1, 1])
     with col1:
-        uploaded_files = st.file_uploader(
-            "Upload Fridge/Pantry Photos 📸", type=["jpg", "jpeg", "png"],
-            accept_multiple_files=True)
+        uploaded_files = st.file_uploader("Upload Fridge Photos 📸", type=["jpg", "jpeg", "png"], accept_multiple_files=True)
     with col2:
-        camera_photo = st.camera_input("Or take a picture of your fridge! 📱")
+        camera_photo = st.camera_input("Take a picture! 📱")
 
     all_photos = list(uploaded_files or [])
-    if camera_photo:
-        all_photos.append(camera_photo)
-
-    if all_photos:
-        st.success(f"📸 {len(all_photos)} photo(s) provided!")
-        img_cols = st.columns(min(len(all_photos), 4))
-        for i, f in enumerate(all_photos[:4]):
-            with img_cols[i]:
-                st.image(f, width="stretch")
+    if camera_photo: all_photos.append(camera_photo)
 
     if all_photos and not st.session_state.photos_analyzed:
         with st.spinner("🤖 Analyzing your groceries with Gemini Vision..."):
             try:
-                images  = [Image.open(f) for f in all_photos]
-                prompt  = ("Analyze these images of a fridge, pantry, or groceries. "
-                           "List all identifiable ingredients WITH approximate quantities. "
-                           "Return ONLY a comma-separated list, e.g.: 2 apples, 1/2 gallon milk.")
-                resp    = client.models.generate_content(
-                    model="gemini-2.5-flash", contents=[prompt] + images)
+                images = [Image.open(f) for f in all_photos]
+                prompt = ("Analyze these images. List all identifiable ingredients WITH approximate quantities. "
+                          "Return ONLY a comma-separated list, e.g.: 2 apples, 1/2 gallon milk.")
+                resp = client.models.generate_content(model="gemini-2.5-flash", contents=[prompt] + images)
                 st.session_state.parsed_ingredients = resp.text
-                st.session_state.photos_analyzed    = True
-                st.rerun()
+                st.session_state.photos_analyzed = True
             except Exception as e:
                 st.error(f"Vision parsing error: {e}")
 
-    st.markdown("---")
-    st.markdown("### Active Inventory")
-    editable_ingredients = st.text_area(
-        "Edit your available fresh ingredients here (comma-separated):",
-        value=st.session_state.parsed_ingredients, height=100)
-    st.caption("Pantry staples (set in Profile) are automatically included.")
-
-    if st.button("🚀 Generate Meal Plan!"):
+    editable_ingredients = st.text_area("Edit your fresh ingredients (comma-separated):", 
+                                        value=st.session_state.parsed_ingredients, height=100)
+    
+    if st.button("🚀 Generate Menu", use_container_width=True):
         st.session_state.parsed_ingredients = editable_ingredients
+        with st.spinner("🧠 Designing menu..."):
+            user_profile = st.session_state.user_profile
+            disliked_uids = set(user_profile.get("disliked", []))
+            liked_uids = user_profile.get("liked", [])
 
-        with st.spinner("🧠 Planning your perfect week..."):
-            all_recipes = load_recipes()
-            if not all_recipes:
-                st.error("No recipes found!")
-                st.stop()
-
-            user_profile   = st.session_state.user_profile
-            disliked_uids  = set(user_profile.get("disliked", []))
-            liked_uids     = user_profile.get("liked", [])
-
-            # Hard filter: remove disliked recipes entirely
             filtered_library = [r for r in all_recipes if r["uid"] not in disliked_uids]
-
-            inventory = (f"Fresh Ingredients: {st.session_state.parsed_ingredients}\n"
-                         f"Assumed staples: {', '.join(pantry_staples)}")
-            filtered_recipes = filter_recipes(filtered_library, inventory, max_recipes=150)
-            slim_recipes     = [{"uid": r["uid"], "name": r["name"],
-                                  "prep_time": r["prep_time"]} for r in filtered_recipes]
-            recipes_json     = json.dumps(slim_recipes)
-
-            # Liked recipes prompt injection
+            
+            inventory_payload = f"Fresh Ingredients: {editable_ingredients}\nAssumed staples: {', '.join(pantry_staples)}"
+            filtered_recipes = filter_recipes(filtered_library, inventory_payload, max_recipes=150)
+            slim_recipes = [{"uid": r["uid"], "name": r["name"], "prep_time": r["prep_time"]} for r in filtered_recipes]
+            
             liked_names = [r["name"] for r in all_recipes if r["uid"] in liked_uids]
-            liked_injection = ""
-            if liked_names:
-                names_str = ", ".join(liked_names)
-                liked_injection = (
-                    f"\nThe user explicitly loves these recipes: {names_str}. "
-                    "Strongly prioritise matching current ingredients to at least one of these favourites."
-                )
-
+            liked_injection = f"\nThe user loves these: {', '.join(liked_names)}. Prioritize matching ingredients to these if possible." if liked_names else ""
+            
             system_instruction = f'''You are an intelligent, agentic meal planner.
-You have access to the user's available inventory of seasonal vegetables from a weekly delivery:
-{inventory}
+Inventory:
+{inventory_payload}
 {liked_injection}
 
 Constraints:
-- Meal Structure: {meal_type}
-- Caloric Goal: {calories_goal} kcal
-- Other Nutrition constraints: {nutrition_info}
+- Structure: {meal_type}
+- Target: {calories_goal} kcal
+- Other criteria: {nutrition_info}
 
-Your task:
-- Output a 5-day weekday meal plan (Monday to Friday).
-- Prioritise recipes that use the vegetables in the inventory, but also suggest recipes using meats and other ingredients.
-- You MUST output STRICT valid JSON and NOTHING ELSE. No markdown code blocks.
-
-Format:
-[
-  {{"day": "Monday", "recipe_uid": "UID", "reasoning": "Brief reason"}},
-  ...
-]
-
-Only pick valid UIDs from the provided list.'''
+Task: Output a 5-day weekday meal plan (Monday to Friday). Focus on the inventory but include meats/other ingredients.
+Output STRICT valid JSON ONLY. Format:
+[ {{"day": "Monday", "recipe_uid": "UID", "reasoning": "Brief reason"}}, ... ]'''
 
             try:
-                response  = client.models.generate_content(
-                    model="gemini-2.5-pro",
-                    contents=[system_instruction, "Recipes:\n" + recipes_json])
-                raw_text  = response.text.strip()
-                if raw_text.startswith("```json"):
-                    raw_text = raw_text[7:-3]
-                elif raw_text.startswith("```"):
-                    raw_text = raw_text[3:-3]
-                st.session_state.meal_plan = json.loads(raw_text.strip())
-                st.session_state.step      = 2
-                # Save to Firestore history
-                save_meal_plan(st.session_state.current_user, st.session_state.meal_plan)
-                st.rerun()
+                response = client.models.generate_content(model="gemini-2.5-pro", contents=[system_instruction, "Recipes:\n" + json.dumps(slim_recipes)])
+                raw_text = response.text.strip()
+                if raw_text.startswith("```json"): raw_text = raw_text[7:-3]
+                elif raw_text.startswith("```"): raw_text = raw_text[3:-3]
+                
+                new_plan = json.loads(raw_text.strip())
+                # Save to DB
+                save_meal_plan(
+                    user_id=st.session_state.current_user,
+                    week_start=monday_date_str,
+                    inventory=inventory_payload,
+                    plan_data=new_plan
+                )
+                
+                # Cleanup state so next time dialog opens it's fresh
+                st.session_state.parsed_ingredients = ""
+                st.session_state.photos_analyzed = False
+                st.rerun() # Closes modal
             except Exception as e:
                 st.error(f"Generation error: {e}")
 
 
+# ---------------------------------------------------------------------------
+# Recipe card renderer
+# ---------------------------------------------------------------------------
+def render_recipe_card(recipe: dict, reason: str, idx: int, 
+                       plan_doc_id: str, full_plan_data: list,
+                       inventory_snapshot: str,
+                       all_recipes: List[dict],
+                       base_date_str: str):
+    
+    uid = recipe.get("uid", "")
+    day_name = recipe.get("_day", "Unknown")
+    
+    with st.container(border=True):
+        col_img, col_info = st.columns([1, 4])
+        
+        with col_img:
+            b64_image = get_recipe_image(recipe_uid=uid, archive_path=recipe.get("archive_path", ""), inner_path=recipe.get("inner_path", ""))
+            if b64_image: st.image(base64.b64decode(b64_image), width="stretch")
+            else: st.caption("No photo")
+
+        with col_info:
+            if recipe.get("source_url"): st.markdown(f"### [{recipe['name']}]({recipe['source_url']})")
+            else: st.subheader(recipe["name"])
+            st.caption(f"⏱️ Prep: {recipe.get('prep_time','N/A')}m | Cook: {recipe.get('cook_time','N/A')}m")
+            if reason: st.write(f"**Why this?** {reason}")
+
+            # Rating buttons
+            profile = st.session_state.user_profile
+            is_liked = uid in profile.get("liked", [])
+            is_disliked = uid in profile.get("disliked", [])
+            user_id = st.session_state.current_user
+            
+            rcol1, rcol2, _ = st.columns([1, 1, 8])
+            with rcol1:
+                liked_label = "✅" if is_liked else "👍"
+                if st.button(liked_label, key=f"lk_{uid}_{idx}_{plan_doc_id}"):
+                    update_recipe_rating(user_id, uid, "remove_like" if is_liked else "like")
+                    st.rerun()
+            with rcol2:
+                disliked_label = "❌" if is_disliked else "👎"
+                if st.button(disliked_label, key=f"dk_{uid}_{idx}_{plan_doc_id}"):
+                    update_recipe_rating(user_id, uid, "remove_dislike" if is_disliked else "dislike")
+                    st.rerun()
+
+            # Date check for replacement allowance
+            # Monday = index 0. So day_offset = idx (assuming 5 days M-F are idx 0-4)
+            meal_date = datetime.strptime(base_date_str, "%Y-%m-%d") + timedelta(days=idx)
+            today_date = datetime.now().date()
+            is_past_meal = meal_date.date() < today_date
+            
+            if not is_past_meal and client:
+                with st.expander("🔀 Replace this meal..."):
+                    guidance = st.text_input("Constraints (e.g., 'Make it vegetarian'):", key=f"gd_{uid}_{idx}_{plan_doc_id}")
+                    if st.button("Generate Alternative", key=f"rp_{uid}_{idx}_{plan_doc_id}"):
+                        with st.spinner("Finding remote alternative..."):
+                            disliked_uids = set(profile.get("disliked", []))
+                            scheduled_uids = [p.get("recipe_uid", "") for p in full_plan_data]
+                            excluded = set(scheduled_uids) | disliked_uids
+                            
+                            filtered = filter_recipes(all_recipes, inventory_snapshot, 150)
+                            slim = [{"uid": r["uid"], "name": r["name"]} for r in filtered if r["uid"] not in excluded]
+                            
+                            prompt = (f"The user rejected '{recipe['name']}' for {day_name}.\n"
+                                      f"Inventory: {inventory_snapshot}\nConstraints: {guidance}\n"
+                                      f"EXCLUDE these UIDs: {', '.join(f'{u}' for u in excluded)}\n"
+                                      f"Return ONLY one JSON object: {{\"day\": \"{day_name}\", \"recipe_uid\": \"...\", \"reasoning\": \"...\"}}")
+                            try:
+                                resp = client.models.generate_content(model="gemini-2.5-pro", contents=[prompt, json.dumps(slim)])
+                                r_text = resp.text.strip()
+                                if r_text.startswith("```json"): r_text = r_text[7:-3]
+                                elif r_text.startswith("```"): r_text = r_text[3:-3]
+                                
+                                new_meal_node = json.loads(r_text.strip())
+                                # Immediate Database update
+                                full_plan_data[idx] = new_meal_node
+                                update_meal_plan_in_db(plan_doc_id, full_plan_data)
+                                st.rerun()
+                            except Exception as e:
+                                st.error(f"Failed to find alternative: {e}")
+            elif is_past_meal:
+                st.caption("*(Meals in the past cannot be replaced)*")
+
+
 # ============================================================
-# STEP 2 — Three-tab view: This Week / History / Profile
+# MAIN UI
 # ============================================================
-elif st.session_state.step == 2:
+st.title("✨ Intelligent Agentic Meal Planner")
 
-    all_recipes  = load_recipes()
-    recipe_dict  = {r["uid"]: r for r in all_recipes}
+if not client:
+    st.warning("🔒 Please configure your Gemini API key in `.streamlit/secrets.toml`.")
+    st.stop()
 
-    tab_plan, tab_history, tab_profile = st.tabs(["📅 This Week", "🕐 History", "👤 Profile"])
+tab_recipes, tab_profile = st.tabs(["🍽️ Recipes", "👤 Profile"])
 
-    # ----------------------------------------------------------
-    # TAB 1 — This Week
-    # ----------------------------------------------------------
-    with tab_plan:
-        st.markdown("### 📅 Your Weekly Meal Plan")
-        st.markdown("Rate recipes to personalise future plans, or ask the agent to swap a day.")
+# ----------------------------------------------------------
+# TAB 1 — RECIPES CAROUSEL
+# ----------------------------------------------------------
+with tab_recipes:
+    # Carousel Navigation
+    viewed_monday = st.session_state.viewed_monday
+    vm_dt = datetime.strptime(viewed_monday, "%Y-%m-%d")
+    
+    c1, c2, c3 = st.columns([1, 2, 1])
+    with c1:
+        st.markdown("<div class='carousel-btn'>", unsafe_allow_html=True)
+        if st.button("◀ Previous Week", use_container_width=True):
+            st.session_state.viewed_monday = shift_week(viewed_monday, -1)
+            st.rerun()
+        st.markdown("</div>", unsafe_allow_html=True)
+    with c2:
+        st.markdown(f"<h3 style='text-align:center;'>Week of {vm_dt.strftime('%d %B %Y')}</h3>", unsafe_allow_html=True)
+    with c3:
+        st.markdown("<div class='carousel-btn'>", unsafe_allow_html=True)
+        if st.button("Next Week ▶", use_container_width=True):
+            st.session_state.viewed_monday = shift_week(viewed_monday, 1)
+            st.rerun()
+        st.markdown("</div>", unsafe_allow_html=True)
+        
+    st.markdown("---")
 
-        for idx, day_plan in enumerate(st.session_state.meal_plan):
-            day    = day_plan.get("day", "Unknown Day")
-            uid    = day_plan.get("recipe_uid", "")
+    all_recipes = load_recipes()
+    recipe_dict = {r["uid"]: r for r in all_recipes}
+
+    doc_id, plan_data, inventory_snapshot = get_meal_plan_for_week(st.session_state.current_user, viewed_monday)
+    
+    if plan_data:
+        # Render the weekly plan
+        for idx, day_plan in enumerate(plan_data):
+            day = day_plan.get("day", "Unknown Day")
+            uid = day_plan.get("recipe_uid", "")
             reason = day_plan.get("reasoning", "")
             recipe = recipe_dict.get(uid)
-
+            
             st.markdown(f"#### **{day}**")
             if recipe:
-                recipe["_day"] = day  # pass day context into replacer
+                recipe["_day"] = day
                 render_recipe_card(
                     recipe=recipe, reason=reason, idx=idx,
-                    card_key_prefix="plan",
-                    show_replace=True,
-                    all_recipes=all_recipes,
-                    client=client,
-                    pantry_staples=pantry_staples,
-                    meal_type=meal_type,
-                    calories_goal=calories_goal,
-                    nutrition_info=nutrition_info,
+                    plan_doc_id=doc_id, full_plan_data=plan_data,
+                    inventory_snapshot=inventory_snapshot,
+                    all_recipes=all_recipes, base_date_str=viewed_monday
                 )
             else:
                 with st.container(border=True):
                     st.error(f"Recipe UID `{uid}` not found in library.")
+    else:
+        # Empty State
+        st.info("No menu planned for this week.")
+        if st.button("🪄 Plan This Week", type="primary"):
+            plan_week_dialog(viewed_monday, all_recipes)
 
-    # ----------------------------------------------------------
-    # TAB 2 — History
-    # ----------------------------------------------------------
-    with tab_history:
-        st.markdown("### 🕐 Past Meal Plans")
-        history = get_meal_plan_history(st.session_state.current_user)
-        if not history:
-            st.info("No past plans yet — generate one first!")
-        else:
-            for plan_doc in history:
-                datestamp = plan_doc.get("datestamp")
-                date_str  = datestamp.strftime("%A %d %B %Y") if hasattr(datestamp, "strftime") else "Previous plan"
-                with st.expander(f"📆 {date_str}"):
-                    plan_data = plan_doc.get("plan_data", [])
-                    for hidx, day_plan in enumerate(plan_data):
-                        day    = day_plan.get("day", "Unknown Day")
-                        uid    = day_plan.get("recipe_uid", "")
-                        reason = day_plan.get("reasoning", "")
-                        recipe = recipe_dict.get(uid)
-                        st.markdown(f"**{day}**")
-                        if recipe:
-                            render_recipe_card(
-                                recipe=recipe, reason=reason, idx=hidx,
-                                card_key_prefix=f"hist_{date_str}",
-                                show_replace=False,
-                            )
-                        else:
-                            st.caption(f"Recipe `{uid}` no longer in library.")
+# ----------------------------------------------------------
+# TAB 2 — PROFILE
+# ----------------------------------------------------------
+with tab_profile:
+    st.markdown("### 👤 Your Profile")
 
-    # ----------------------------------------------------------
-    # TAB 3 — Profile
-    # ----------------------------------------------------------
-    with tab_profile:
-        current_user = st.session_state.current_user
-        st.markdown("### 👤 Your Profile")
+    st.markdown("#### 🎛️ Dietary Preferences")
+    st.caption("These are saved to your profile and used to drive new plan generation.")
 
-        # ---- Dietary preferences ----
-        st.markdown("#### 🎛️ Dietary Preferences")
-        st.caption("These are saved to your profile and used when generating meal plans.")
+    p_col1, p_col2 = st.columns(2)
+    with p_col1:
+        pref_meal_type = st.radio("Meal Structure", ["Main Only", "Main + Starter/Dessert"],
+                                  index=0 if meal_type == "Main Only" else 1)
+        pref_calories = st.slider("Calories/day target", 1500, 3500, calories_goal, 100)
+    with p_col2:
+        pref_nutrition = st.text_area("Other Nutritional Constraints", value=nutrition_info)
+        pref_staples = st.text_area("Pantry Staples", value=pantry_staples_str, height=120)
 
-        p_col1, p_col2 = st.columns(2)
-        with p_col1:
-            pref_meal_type = st.radio(
-                "Meal Structure",
-                ["Main Only", "Main + Starter/Dessert"],
-                index=0 if meal_type == "Main Only" else 1,
-                key="pref_meal_type")
-            pref_calories = st.slider(
-                "Calories/day target", 1500, 3500, calories_goal, 100,
-                key="pref_calories")
-        with p_col2:
-            pref_nutrition = st.text_area(
-                "Other Nutritional Constraints",
-                placeholder="e.g., High protein, low carb",
-                value=nutrition_info,
-                key="pref_nutrition")
-            pref_staples = st.text_area(
-                "Pantry Staples",
-                value=pantry_staples_str,
-                height=120,
-                key="pref_staples")
+    if st.button("💾 Save Preferences"):
+        new_prefs = {
+            "meal_type": pref_meal_type, "calories_goal": pref_calories,
+            "nutrition_info": pref_nutrition, "pantry_staples": pref_staples,
+        }
+        save_user_preferences(st.session_state.current_user, new_prefs)
+        st.session_state.user_profile["preferences"] = new_prefs
+        st.success("✅ Preferences saved!")
+        st.rerun()
 
-        if st.button("💾 Save Preferences"):
-            new_prefs = {
-                "meal_type":     pref_meal_type,
-                "calories_goal": pref_calories,
-                "nutrition_info": pref_nutrition,
-                "pantry_staples": pref_staples,
-            }
-            save_user_preferences(current_user, new_prefs)
-            st.session_state.user_profile["preferences"] = new_prefs
-            st.success("✅ Preferences saved!")
-            st.rerun()
+    st.markdown("---")
+    st.markdown("#### ⭐ Recipe Ratings")
+    profile = st.session_state.user_profile
+    liked_uids    = profile.get("liked", [])
+    disliked_uids = profile.get("disliked", [])
 
-        st.markdown("---")
+    all_recipes = load_recipes()
+    recipe_dict = {r["uid"]: r for r in all_recipes}
 
-        # ---- Liked / Disliked ----
-        st.markdown("#### ⭐ Recipe Ratings")
-        profile = st.session_state.user_profile
-        liked_uids    = profile.get("liked", [])
-        disliked_uids = profile.get("disliked", [])
+    def uid_to_name(uid): return recipe_dict.get(uid, {}).get("name", uid)
+    
+    liked_sorted    = sorted(liked_uids, key=uid_to_name)
+    disliked_sorted = sorted(disliked_uids, key=uid_to_name)
 
-        # Map UIDs → names, sort alphabetically
-        def uid_to_name(uid):
-            r = recipe_dict.get(uid)
-            return r["name"] if r else uid
+    r_col_liked, r_col_disliked = st.columns(2)
+    with r_col_liked:
+        st.markdown("**👍 Liked Recipes**")
+        if not liked_sorted: st.caption("None yet")
+        for luid in liked_sorted:
+            lc1, lc2 = st.columns([5, 1])
+            with lc1: st.write(uid_to_name(luid))
+            with lc2:
+                if st.button("✕", key=f"rml_{luid}"):
+                    update_recipe_rating(st.session_state.current_user, luid, "remove_like")
+                    st.rerun()
 
-        liked_sorted    = sorted(liked_uids,    key=uid_to_name)
-        disliked_sorted = sorted(disliked_uids, key=uid_to_name)
+    with r_col_disliked:
+        st.markdown("**👎 Disliked Recipes**")
+        if not disliked_sorted: st.caption("None yet")
+        for duid in disliked_sorted:
+            dc1, dc2 = st.columns([5, 1])
+            with dc1: st.write(uid_to_name(duid))
+            with dc2:
+                if st.button("✕", key=f"rmd_{duid}"):
+                    update_recipe_rating(st.session_state.current_user, duid, "remove_dislike")
+                    st.rerun()
 
-        r_col_liked, r_col_disliked = st.columns(2)
-
-        with r_col_liked:
-            st.markdown("**👍 Liked Recipes**")
-            if not liked_sorted:
-                st.caption("None yet")
-            for luid in liked_sorted:
-                name = uid_to_name(luid)
-                lc1, lc2 = st.columns([5, 1])
-                with lc1:
-                    r = recipe_dict.get(luid)
-                    if r and r.get("source_url"):
-                        st.markdown(f"[{name}]({r['source_url']})")
-                    else:
-                        st.write(name)
-                with lc2:
-                    if st.button("✕", key=f"rm_like_{luid}", help="Remove from liked"):
-                        update_recipe_rating(current_user, luid, "remove_like")
-                        st.rerun()
-
-        with r_col_disliked:
-            st.markdown("**👎 Disliked Recipes**")
-            if not disliked_sorted:
-                st.caption("None yet")
-            for duid in disliked_sorted:
-                name = uid_to_name(duid)
-                dc1, dc2 = st.columns([5, 1])
-                with dc1:
-                    r = recipe_dict.get(duid)
-                    if r and r.get("source_url"):
-                        st.markdown(f"[{name}]({r['source_url']})")
-                    else:
-                        st.write(name)
-                with dc2:
-                    if st.button("✕", key=f"rm_dislike_{duid}", help="Remove from disliked"):
-                        update_recipe_rating(current_user, duid, "remove_dislike")
-                        st.rerun()
