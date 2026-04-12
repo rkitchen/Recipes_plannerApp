@@ -22,15 +22,17 @@ st.markdown('''
 html, body, [class*="css"]  { font-family: 'Outfit', sans-serif; color: #1e293b; }
 [data-testid="stSidebar"] { background: #f8fafc !important; border-right: 1px solid #e2e8f0; }
 .stApp { background: #ffffff; }
-h1, h2, h3 { background: linear-gradient(135deg, #f43f5e, #f97316); -webkit-background-clip: text; -webkit-text-fill-color: transparent; font-weight: 800 !important; }
+h1, h2, h3 { background: linear-gradient(135deg, #3f9df4, #3f90f4); -webkit-background-clip: text; -webkit-text-fill-color: transparent; font-weight: 800 !important; }
 div[data-baseweb="file-uploader"] { background: #f8fafc !important; border: 1px dashed #cbd5e1 !important; border-radius: 16px !important; padding: 10px; transition: all 0.3s ease; }
-div[data-baseweb="file-uploader"]:hover { border: 1px dashed #f43f5e !important; background: #fff1f2 !important; }
-.stButton > button { background: linear-gradient(135deg, #f43f5e 0%, #f97316 100%); border: none; border-radius: 12px; color: #ffffff !important; padding: 0.75rem 1.5rem; font-size: 1.1rem; font-weight: 600; transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1); box-shadow: 0 4px 15px rgba(244, 63, 94, 0.3); width: 100%; }
-.stButton > button:hover { transform: translateY(-2px) scale(1.02); box-shadow: 0 8px 25px rgba(244, 63, 94, 0.4); }
-.stButton > button:active { transform: translateY(1px); }
+div[data-baseweb="file-uploader"]:hover { border: 1px dashed #3f9df4 !important; background: #ffffff !important; }
+.stButton > button { background: linear-gradient(135deg, #3f9df4 0%, #3f90f4 100%); border: none; border-radius: 12px; color: #ffffff !important; padding: 0.75rem 1.5rem; font-size: 1.1rem; font-weight: 600; transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1); box-shadow: 0 4px 15px rgba(0, 0, 0, 0.3); width: 100%; }
+.stButton > button:hover { transform: translateY(-0px) scale(1.01); box-shadow: 0 8px 25px rgba(0, 0, 0, 0.4); }
+.stButton > button:active { transform: translateY(0px); }
 .carousel-btn button { padding: 0.25rem 0.5rem; font-size: 1rem; }
 </style>
 ''', unsafe_allow_html=True)
+
+# h1, h2, h3 { background: linear-gradient(135deg, #f43f5e, #f97316); -webkit-background-clip: text; -webkit-text-fill-color: transparent; font-weight: 800 !important; }
 
 # Session State Defaults
 if "viewed_monday" not in st.session_state: st.session_state.viewed_monday = get_target_week()

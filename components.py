@@ -19,35 +19,50 @@ def render_recipe_card(recipe: dict, reason: str, idx: int,
     day_name = recipe.get("_day", "Unknown")
     
     with st.container(border=True):
-        col_img, col_info = st.columns([1, 4])
+        col_img, col_info, col_rating = st.columns([2, 5, 1.5])
         
+        profile = st.session_state.user_profile
+        is_liked = uid in profile.get("liked", [])
+        is_disliked = uid in profile.get("disliked", [])
+        user_id = st.session_state.current_user
+
         with col_img:
             b64_image = get_recipe_image(recipe_uid=uid, archive_path=recipe.get("archive_path", ""), inner_path=recipe.get("inner_path", ""))
             if b64_image: st.image(base64.b64decode(b64_image), width="stretch")
             else: st.caption("No photo")
 
+        with col_rating:
+            st.markdown("<div style='margin-top: 5px'></div>", unsafe_allow_html=True)
+            current_rating = "👍" if is_liked else "👎" if is_disliked else "😐"
+            
+            new_rating = st.segmented_control(
+                "Rate this recipe",
+                options=["👍", "😐", "👎"],
+                default=current_rating,
+                key=f"rtg_{uid}_{idx}_{plan_doc_id}",
+                label_visibility="collapsed"
+            )
+            
+            # Treat a de-selected widget (None) as neutral
+            eff_rating = new_rating if new_rating else "😐"
+            
+            if eff_rating != current_rating:
+                if eff_rating == "👍":
+                    update_recipe_rating(user_id, uid, "like")
+                elif eff_rating == "👎":
+                    update_recipe_rating(user_id, uid, "dislike")
+                elif eff_rating == "😐":
+                    if is_liked: update_recipe_rating(user_id, uid, "remove_like")
+                    if is_disliked: update_recipe_rating(user_id, uid, "remove_dislike")
+                st.rerun()
+            
+            st.caption(f"⏱️ Prep: {recipe.get('prep_time','N/A')}m | Cook: {recipe.get('cook_time','N/A')}m")
+
         with col_info:
             if recipe.get("source_url"): st.markdown(f"### [{recipe['name']}]({recipe['source_url']})")
             else: st.subheader(recipe["name"])
-            st.caption(f"⏱️ Prep: {recipe.get('prep_time','N/A')}m | Cook: {recipe.get('cook_time','N/A')}m")
-            if reason: st.write(f"**Why this?** {reason}")
-
-            profile = st.session_state.user_profile
-            is_liked = uid in profile.get("liked", [])
-            is_disliked = uid in profile.get("disliked", [])
-            user_id = st.session_state.current_user
-            
-            rcol1, rcol2, _ = st.columns([1, 1, 8])
-            with rcol1:
-                liked_label = "✅" if is_liked else "👍"
-                if st.button(liked_label, key=f"lk_{uid}_{idx}_{plan_doc_id}"):
-                    update_recipe_rating(user_id, uid, "remove_like" if is_liked else "like")
-                    st.rerun()
-            with rcol2:
-                disliked_label = "❌" if is_disliked else "👎"
-                if st.button(disliked_label, key=f"dk_{uid}_{idx}_{plan_doc_id}"):
-                    update_recipe_rating(user_id, uid, "remove_dislike" if is_disliked else "dislike")
-                    st.rerun()
+            # st.caption(f"⏱️ Prep: {recipe.get('prep_time','N/A')}m | Cook: {recipe.get('cook_time','N/A')}m")
+            if reason: st.write(f"**Why?**  {reason}")
 
             meal_date = datetime.strptime(base_date_str, "%Y-%m-%d") + timedelta(days=idx)
             today_date = datetime.now().date()
