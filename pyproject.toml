@@ -1,0 +1,12 @@
+[project]
+name = "recipes-plannerapp"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.14"
+dependencies = [
+    "firebase-admin>=7.4.0",
+    "google-genai>=1.72.0",
+    "pillow>=12.2.0",
+    "streamlit>=1.56.0",
+]
