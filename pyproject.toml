@@ -13,5 +13,8 @@ dependencies = [
 
 [tool.uv]
 # This is a Streamlit app, not an installable package.
-# Prevents uv/poetry from trying to install the project itself.
 package = false
+
+[tool.poetry]
+# Tells Poetry (used by Streamlit Cloud) not to install this as a package.
+package-mode = false
