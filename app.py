@@ -223,7 +223,7 @@ def get_meal_plan_history(user_id: str, limit: int = 8) -> list:
         return []
     try:
         docs = (db.collection("meal_plans")
-                  .where("user_id", "==", user_id)
+                  .where(filter=fb_firestore.FieldFilter("user_id", "==", user_id))
                   .order_by("datestamp", direction="DESCENDING")
                   .limit(limit)
                   .stream())
