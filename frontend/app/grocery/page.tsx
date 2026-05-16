@@ -1,0 +1,166 @@
+"use client";
+
+/**
+ * Grocery List page — generate and interact with a smart shopping list.
+ * Fetches recipe UIDs from the current week's meal plan, sends to the backend
+ * for AI-powered consolidation and categorisation.
+ */
+
+import { useState, useEffect } from "react";
+import { useAuth } from "@/components/AuthProvider";
+import GroceryList from "@/components/GroceryList";
+import {
+  fetchMealPlan,
+  fetchUserProfile,
+  generateGroceryList,
+} from "@/lib/api";
+import type { GroceryCategory } from "@/lib/types";
+
+function getTargetWeek(): string {
+  const today = new Date();
+  const day = today.getDay();
+  if (day === 0 || day === 6) {
+    const daysAhead = day === 0 ? 1 : 2;
+    const next = new Date(today);
+    next.setDate(today.getDate() + daysAhead);
+    return next.toISOString().split("T")[0];
+  }
+  const monday = new Date(today);
+  monday.setDate(today.getDate() - (day - 1));
+  return monday.toISOString().split("T")[0];
+}
+
+export default function GroceryPage() {
+  const { user } = useAuth();
+  const [categories, setCategories] = useState<GroceryCategory[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+  const [hasPlan, setHasPlan] = useState<boolean | null>(null);
+  const [isOffline, setIsOffline] = useState(false);
+
+  // Try loading cached grocery list on mount
+  useEffect(() => {
+    try {
+      const cached = localStorage.getItem("grocery-list-data");
+      if (cached) {
+        setCategories(JSON.parse(cached));
+      }
+    } catch {}
+
+    // Check if offline
+    const handleOnline = () => setIsOffline(false);
+    const handleOffline = () => setIsOffline(true);
+    setIsOffline(!navigator.onLine);
+    window.addEventListener("online", handleOnline);
+    window.addEventListener("offline", handleOffline);
+    return () => {
+      window.removeEventListener("online", handleOnline);
+      window.removeEventListener("offline", handleOffline);
+    };
+  }, []);
+
+  // Check if current week has a plan
+  useEffect(() => {
+    if (!user) return;
+    const weekStart = getTargetWeek();
+    fetchMealPlan(weekStart)
+      .then((plan) => setHasPlan(plan.plan_data.length > 0))
+      .catch(() => setHasPlan(false));
+  }, [user]);
+
+  const handleGenerate = async () => {
+    if (!user) return;
+    setLoading(true);
+    setError("");
+
+    try {
+      const weekStart = getTargetWeek();
+      const [plan, profile] = await Promise.all([
+        fetchMealPlan(weekStart),
+        fetchUserProfile(),
+      ]);
+
+      if (!plan.plan_data.length) {
+        setError("No meal plan found for this week. Generate a plan first!");
+        setLoading(false);
+        return;
+      }
+
+      const recipeUids = plan.plan_data.map((d) => d.recipe_uid);
+      const pantryStaples = profile.preferences.pantry_staples || "";
+
+      const result = await generateGroceryList({
+        recipe_uids: recipeUids,
+        pantry_staples: pantryStaples,
+      });
+
+      setCategories(result.categories);
+
+      // Clear old checked state for a fresh list
+      localStorage.removeItem("grocery-list-checked");
+    } catch (e: any) {
+      setError(e.message || "Failed to generate grocery list");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  if (!user) return null;
+
+  return (
+    <div className="page" id="grocery-page">
+      <h1 className="page-title">🛒 Grocery List</h1>
+
+      {isOffline && (
+        <div className="offline-banner" id="offline-banner">
+          📶 You&apos;re offline — showing cached data
+        </div>
+      )}
+
+      {/* Generate button */}
+      <div className="grocery-actions">
+        <button
+          className="btn btn--primary"
+          onClick={handleGenerate}
+          disabled={loading || hasPlan === false}
+          id="generate-grocery-btn"
+        >
+          {loading ? (
+            <>
+              <span className="spinner" /> Generating with AI...
+            </>
+          ) : categories.length > 0 ? (
+            "🔄 Regenerate List"
+          ) : (
+            "✨ Generate Grocery List"
+          )}
+        </button>
+        {hasPlan === false && (
+          <p className="grocery-hint">
+            No meal plan for this week yet. Head to the Meals tab to plan first!
+          </p>
+        )}
+      </div>
+
+      {error && (
+        <div className="form-error" id="grocery-error">
+          {error}
+        </div>
+      )}
+
+      {/* The grocery list */}
+      <GroceryList categories={categories} />
+
+      {categories.length === 0 && !loading && (
+        <div className="empty-state" id="no-grocery-state">
+          <span className="empty-state-icon">🛒</span>
+          <p>
+            Generate a grocery list from your meal plan.
+            <br />
+            Items will be sorted by supermarket aisle!
+          </p>
+        </div>
+      )}
+    </div>
+  );
+}

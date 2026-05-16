@@ -1,0 +1,121 @@
+"""
+Gemini service — wraps the Google GenAI client for meal plan generation and replacement.
+Prompt logic ported from the Streamlit components.py.
+"""
+
+import json
+import re
+from google import genai
+from config import get_settings
+
+_client = None
+
+
+def init_gemini() -> None:
+    """Initialise the Gemini client. Call once at app startup."""
+    global _client
+    settings = get_settings()
+    if settings.GEMINI_API_KEY:
+        _client = genai.Client(api_key=settings.GEMINI_API_KEY)
+
+
+def get_client() -> genai.Client:
+    if _client is None:
+        init_gemini()
+    return _client
+
+
+def _parse_json_response(text: str) -> list | dict:
+    """Strip markdown fences and parse JSON from an LLM response."""
+    raw = text.strip()
+    if raw.startswith("```json"):
+        raw = raw[7:]
+    if raw.startswith("```"):
+        raw = raw[3:]
+    if raw.endswith("```"):
+        raw = raw[:-3]
+    return json.loads(raw.strip())
+
+
+def generate_meal_plan(
+    recipes: list[dict],
+    inventory: str,
+    liked_names: list[str],
+    meal_type: str = "Main Only",
+    calories_goal: int = 2000,
+    nutrition_info: str = "",
+) -> list[dict]:
+    """
+    Generate a 5-day meal plan using Gemini 2.5 Pro.
+    Returns a list of {day, recipe_uid, reasoning} dicts.
+    """
+    client = get_client()
+
+    liked_injection = ""
+    if liked_names:
+        liked_injection = (
+            f"\nThe user loves these: {', '.join(liked_names)}. "
+            "Prioritize matching ingredients to these if possible."
+        )
+
+    slim = [{"uid": r["uid"], "name": r["name"], "prep_time": r.get("prep_time", "")} for r in recipes]
+
+    system_instruction = f"""You are an intelligent, agentic meal planner.
+Inventory:
+{inventory}
+{liked_injection}
+
+Constraints:
+- Structure: {meal_type}
+- Target: {calories_goal} kcal
+- Other criteria: {nutrition_info}
+
+Task: Output a 5-day weekday meal plan (Monday to Friday). Focus on the inventory but include meats/other ingredients.
+Output STRICT valid JSON ONLY. Format:
+[ {{"day": "Monday", "recipe_uid": "UID", "reasoning": "Brief reason"}}, ... ]"""
+
+    response = client.models.generate_content(
+        model="gemini-2.5-pro",
+        contents=[system_instruction, "Recipes:\n" + json.dumps(slim)],
+    )
+    return _parse_json_response(response.text)
+
+
+def replace_meal(
+    original_name: str,
+    day_name: str,
+    inventory: str,
+    guidance: str,
+    excluded_uids: list[str],
+    candidate_recipes: list[dict],
+) -> dict:
+    """
+    Generate a replacement meal for a specific day.
+    Returns a single {day, recipe_uid, reasoning} dict.
+    """
+    client = get_client()
+
+    slim = [{"uid": r["uid"], "name": r["name"]} for r in candidate_recipes if r["uid"] not in excluded_uids]
+
+    prompt = (
+        f"The user rejected '{original_name}' for {day_name}.\n"
+        f"Inventory: {inventory}\nConstraints: {guidance}\n"
+        f"EXCLUDE these UIDs: {', '.join(excluded_uids)}\n"
+        f'Return ONLY one JSON object: {{"day": "{day_name}", "recipe_uid": "...", "reasoning": "..."}}'
+    )
+
+    response = client.models.generate_content(
+        model="gemini-2.5-pro",
+        contents=[prompt, json.dumps(slim)],
+    )
+    return _parse_json_response(response.text)
+
+
+def call_gemini(prompt: str, data: str, model: str = "gemini-2.5-flash") -> str:
+    """Generic Gemini call. Returns raw text response."""
+    client = get_client()
+    response = client.models.generate_content(
+        model=model,
+        contents=[prompt, data],
+    )
+    return response.text

@@ -1,7 +1,26 @@
+# Streamlit (legacy branch)
 .streamlit/secrets.toml
+
+# Python
 __pycache__/
-*.paprikarecipes
 venv/
-.venv
+.venv/
+*.pyc
+
+# Backend
+backend/.env
+backend/serviceAccount.json
+
+# Frontend
+frontend/node_modules/
+frontend/.next/
+frontend/.env.local
+frontend/public/sw.js
+frontend/public/workbox-*.js
+frontend/public/sw.js.map
+frontend/public/workbox-*.js.map
+
+# General
 .DS_Store
+*.paprikarecipes
 uv.lock
