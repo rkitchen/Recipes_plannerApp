@@ -34,7 +34,25 @@ class Settings(BaseSettings):
     def firebase_credentials(self) -> dict | str:
         """Return parsed service account info for firebase_admin.credentials.Certificate."""
         if self.FIREBASE_SERVICE_ACCOUNT_JSON:
-            return json.loads(self.FIREBASE_SERVICE_ACCOUNT_JSON)
+            raw_json = self.FIREBASE_SERVICE_ACCOUNT_JSON.strip()
+            
+            # Check if it's Base64 (usually doesn't start with '{')
+            if not raw_json.startswith("{"):
+                try:
+                    import base64
+                    raw_json = base64.b64decode(raw_json).decode("utf-8")
+                except Exception:
+                    pass # Fallback to original if decoding fails
+
+            # Clean up potential shell mangling
+            if raw_json.startswith("FIREBASE_SERVICE_ACCOUNT_JSON="):
+                raw_json = raw_json.replace("FIREBASE_SERVICE_ACCOUNT_JSON=", "", 1)
+            if raw_json.startswith("'") and raw_json.endswith("'"):
+                raw_json = raw_json[1:-1]
+            if raw_json.startswith('"') and raw_json.endswith('"'):
+                raw_json = raw_json[1:-1]
+                
+            return json.loads(raw_json)
         if self.FIREBASE_SERVICE_ACCOUNT_PATH:
             return self.FIREBASE_SERVICE_ACCOUNT_PATH
         raise ValueError(
