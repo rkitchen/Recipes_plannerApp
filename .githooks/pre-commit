@@ -1,0 +1,57 @@
+#!/bin/bash
+#
+# Pre-commit hook: block commits containing likely secrets.
+# Catches API keys, private keys, passwords, and tokens before they hit git history.
+#
+
+RED='\033[0;31m'
+YELLOW='\033[1;33m'
+NC='\033[0m' # No Color
+
+# Patterns that should never appear in committed code
+PATTERNS=(
+    'AIzaSy[0-9A-Za-z_-]{33}'                    # Google API keys
+    '-----BEGIN PRIVATE KEY-----'                  # Private keys (PEM)
+    '-----BEGIN RSA PRIVATE KEY-----'              # RSA private keys
+    'AKIA[0-9A-Z]{16}'                             # AWS access keys
+    'ghp_[0-9a-zA-Z]{36}'                          # GitHub personal access tokens
+    'sk-[0-9a-zA-Z]{48}'                           # OpenAI API keys
+    'password\s*=\s*["\x27][^"\x27]{8,}'           # Hardcoded passwords
+)
+
+# Files/paths to exclude from scanning (e.g. examples, docs with placeholders)
+EXCLUDE_PATTERNS="\.env\.example|\.env\.local\.example|README\.md"
+
+echo -e "${YELLOW}🔍 Scanning staged files for secrets...${NC}"
+
+FOUND_SECRET=0
+
+for pattern in "${PATTERNS[@]}"; do
+    # Only scan staged (added/modified) files, excluding binary and excluded paths
+    MATCHES=$(git diff --cached --diff-filter=ACM -U0 | \
+        grep -v "^---" | grep -v "^+++" | \
+        grep -E "^\+" | \
+        grep -v -E "$EXCLUDE_PATTERNS" | \
+        grep -E "$pattern" || true)
+
+    if [ -n "$MATCHES" ]; then
+        echo -e "${RED}❌ BLOCKED: Potential secret detected matching pattern:${NC}"
+        echo -e "${RED}   Pattern: $pattern${NC}"
+        echo ""
+        echo "$MATCHES" | head -5
+        echo ""
+        FOUND_SECRET=1
+    fi
+done
+
+if [ "$FOUND_SECRET" -eq 1 ]; then
+    echo -e "${RED}═══════════════════════════════════════════════════════${NC}"
+    echo -e "${RED}  COMMIT BLOCKED: Secrets detected in staged files.${NC}"
+    echo -e "${RED}  Remove the secrets and try again.${NC}"
+    echo -e "${RED}  To bypass (NOT recommended): git commit --no-verify${NC}"
+    echo -e "${RED}═══════════════════════════════════════════════════════${NC}"
+    exit 1
+fi
+
+echo -e "✅ No secrets detected. Proceeding with commit."
+exit 0
