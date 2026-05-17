@@ -5,7 +5,7 @@
  * Features search filtering and quick like/dislike rating.
  */
 
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import { useAuth } from "@/components/AuthProvider";
 import RecipeSheet from "@/components/RecipeSheet";
 import {
@@ -147,13 +147,31 @@ function RecipeTile({ recipe, isLiked, isDisliked, onRate, onTap }: RecipeTilePr
   const [imageData, setImageData] = useState<string | null>(null);
   const [imageLoaded, setImageLoaded] = useState(false);
   const [ratingLoading, setRatingLoading] = useState(false);
+  const tileRef = useRef<HTMLDivElement>(null);
+  const fetchedRef = useRef(false);
 
+  // Lazy-load image only when tile scrolls into view
   useEffect(() => {
-    fetchRecipeImage(recipe.uid)
-      .then((res) => {
-        if (res.photo_data) setImageData(res.photo_data);
-      })
-      .catch(() => {});
+    const el = tileRef.current;
+    if (!el) return;
+
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (entry.isIntersecting && !fetchedRef.current) {
+          fetchedRef.current = true;
+          fetchRecipeImage(recipe.uid)
+            .then((res) => {
+              if (res.photo_data) setImageData(res.photo_data);
+            })
+            .catch(() => {});
+          observer.disconnect();
+        }
+      },
+      { rootMargin: "200px" }
+    );
+
+    observer.observe(el);
+    return () => observer.disconnect();
   }, [recipe.uid]);
 
   const handleLike = async (e: React.MouseEvent) => {
@@ -171,7 +189,7 @@ function RecipeTile({ recipe, isLiked, isDisliked, onRate, onTap }: RecipeTilePr
   };
 
   return (
-    <div className="recipe-tile" id={`recipe-tile-${recipe.uid}`} onClick={onTap} style={{ cursor: "pointer" }}>
+    <div className="recipe-tile" ref={tileRef} id={`recipe-tile-${recipe.uid}`} onClick={onTap} style={{ cursor: "pointer" }}>
       <div className="recipe-tile-image">
         {imageData ? (
           <img

@@ -5,7 +5,7 @@
  * Fetches full recipe data (directions, servings, notes, etc.) on open.
  */
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { fetchRecipeDetail } from "@/lib/api";
 import type { RecipeDetail } from "@/lib/types";
 
@@ -18,6 +18,7 @@ export default function RecipeSheet({ uid, onClose }: RecipeSheetProps) {
   const [recipe, setRecipe] = useState<RecipeDetail | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const sheetRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (!uid) {
@@ -32,18 +33,37 @@ export default function RecipeSheet({ uid, onClose }: RecipeSheetProps) {
       .finally(() => setLoading(false));
   }, [uid]);
 
+  // Lock body scroll when open
+  useEffect(() => {
+    if (uid) {
+      document.body.style.overflow = "hidden";
+      return () => {
+        document.body.style.overflow = "";
+      };
+    }
+  }, [uid]);
+
   if (!uid) return null;
 
   return (
     <div className="sheet-overlay" onClick={onClose} id="recipe-sheet-overlay">
       <div
         className="sheet"
+        ref={sheetRef}
         onClick={(e) => e.stopPropagation()}
+        onTouchMove={(e) => e.stopPropagation()}
         id="recipe-sheet"
       >
-        {/* Drag handle */}
-        <div className="sheet-handle-row">
+        {/* Header with close button */}
+        <div className="sheet-header">
           <div className="sheet-handle" />
+          <button
+            className="sheet-close-btn"
+            onClick={onClose}
+            aria-label="Close"
+          >
+            ✕
+          </button>
         </div>
 
         {loading ? (
