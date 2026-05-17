@@ -126,7 +126,10 @@ def extract_ingredients_from_image(image_bytes: bytes, mime_type: str) -> str:
     Sends an image to Gemini Vision to extract a comma-separated list of ingredients.
     """
     client = get_client()
-    prompt = "Identify the fresh ingredients or groceries visible in this image. Return a simple, comma-separated list of items with no extra text or markdown formatting."
+    prompt = (
+        "Analyze these images. List all identifiable ingredients WITH approximate quantities. "
+        "Return ONLY a comma-separated list, e.g.: 2 apples, 1/2 gallon milk."
+    )
     
     response = client.models.generate_content(
         model="gemini-2.5-flash",
