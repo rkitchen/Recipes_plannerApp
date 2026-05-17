@@ -8,6 +8,7 @@
 import { useState, useEffect, useRef } from "react";
 import { fetchRecipeDetail } from "@/lib/api";
 import type { RecipeDetail } from "@/lib/types";
+import Markdown from "@/components/Markdown";
 
 interface RecipeSheetProps {
   uid: string | null;
@@ -134,13 +135,7 @@ export default function RecipeSheet({ uid, onClose }: RecipeSheetProps) {
                 <section className="sheet-section">
                   <h3 className="sheet-section-title">📝 Directions</h3>
                   <div className="sheet-directions">
-                    {recipe.directions.split("\n").map((line, i) =>
-                      line.trim() ? (
-                        <p key={i} className="sheet-direction-step">
-                          {line}
-                        </p>
-                      ) : null
-                    )}
+                    <Markdown text={recipe.directions} />
                   </div>
                 </section>
               )}
@@ -149,7 +144,9 @@ export default function RecipeSheet({ uid, onClose }: RecipeSheetProps) {
               {recipe.notes && (
                 <section className="sheet-section">
                   <h3 className="sheet-section-title">📌 Notes</h3>
-                  <p className="sheet-notes">{recipe.notes}</p>
+                  <div className="sheet-notes">
+                    <Markdown text={recipe.notes} />
+                  </div>
                 </section>
               )}
 
@@ -157,7 +154,9 @@ export default function RecipeSheet({ uid, onClose }: RecipeSheetProps) {
               {recipe.nutritional_info && (
                 <section className="sheet-section">
                   <h3 className="sheet-section-title">📊 Nutrition</h3>
-                  <p className="sheet-nutrition">{recipe.nutritional_info}</p>
+                  <div className="sheet-nutrition">
+                    <Markdown text={recipe.nutritional_info} />
+                  </div>
                 </section>
               )}
 
