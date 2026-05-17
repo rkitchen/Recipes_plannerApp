@@ -1,5 +1,5 @@
 # Streamlit (legacy branch)
-.streamlit/secrets.toml
+**/secrets.toml
 
 # Python
 __pycache__/
