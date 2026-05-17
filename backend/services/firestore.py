@@ -193,9 +193,11 @@ def get_user_profile(user_id: str) -> dict:
             try:
                 user_record = auth.get_user(user_id)
                 email = user_record.email
-            except Exception:
+            except Exception as e:
+                print(f"Failed to fetch user email from auth: {e}")
                 email = "unknown"
             
+            print(f"Auto-provisioning user document for {user_id} with email {email}")
             doc_ref.set({
                 "email": email,
                 "liked_recipes": [],
@@ -203,7 +205,10 @@ def get_user_profile(user_id: str) -> dict:
                 "preferences": {}
             })
             return empty
-    except Exception:
+    except Exception as e:
+        print(f"CRITICAL ERROR in get_user_profile: {e}")
+        import traceback
+        traceback.print_exc()
         return empty
 
 

@@ -10,6 +10,7 @@ venv/
 # Backend
 backend/.env
 backend/serviceAccount.json
+backend/test_env
 
 # Frontend
 frontend/node_modules/
