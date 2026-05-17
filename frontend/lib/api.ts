@@ -85,8 +85,9 @@ export async function replaceMeal(
 }
 
 export async function extractIngredientsVision(file: File): Promise<{ ingredients: string }> {
-  const token = await getAuthToken();
-  if (!token) throw new Error("No auth token available");
+  const user = auth.currentUser;
+  if (!user) throw new Error("No user logged in");
+  const token = await user.getIdToken();
 
   const formData = new FormData();
   formData.append("file", file);
