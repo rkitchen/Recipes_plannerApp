@@ -5,8 +5,8 @@
  * Allows entering fresh ingredients and triggers Gemini generation.
  */
 
-import { useState } from "react";
-import { generateMealPlan } from "@/lib/api";
+import { useRef, useState } from "react";
+import { generateMealPlan, extractIngredientsVision } from "@/lib/api";
 import type { UserPreferences } from "@/lib/types";
 
 interface PlanDialogProps {
@@ -26,7 +26,9 @@ export default function PlanDialog({
 }: PlanDialogProps) {
   const [freshIngredients, setFreshIngredients] = useState("");
   const [generating, setGenerating] = useState(false);
+  const [scanning, setScanning] = useState(false);
   const [error, setError] = useState("");
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   if (!isOpen) return null;
 
@@ -51,6 +53,27 @@ export default function PlanDialog({
     }
   };
 
+  const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setScanning(true);
+    setError("");
+    try {
+      const res = await extractIngredientsVision(file);
+      if (res.ingredients) {
+        setFreshIngredients((prev) => 
+          prev ? `${prev}, ${res.ingredients}` : res.ingredients
+        );
+      }
+    } catch (err: any) {
+      setError(err.message || "Failed to scan image");
+    } finally {
+      setScanning(false);
+      if (fileInputRef.current) fileInputRef.current.value = "";
+    }
+  };
+
   return (
     <div className="dialog-overlay" onClick={onClose} id="plan-dialog-overlay">
       <div className="dialog" onClick={(e) => e.stopPropagation()} id="plan-dialog">
@@ -66,9 +89,27 @@ export default function PlanDialog({
             Generating a menu for <strong>{weekStart}</strong>
           </p>
 
-          <label className="dialog-label" htmlFor="fresh-ingredients-input">
-            Fresh ingredients available:
-          </label>
+          <div className="dialog-label-row" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <label className="dialog-label" htmlFor="fresh-ingredients-input" style={{ marginBottom: 0 }}>
+              Fresh ingredients available:
+            </label>
+            <button 
+              className="btn btn--secondary" 
+              style={{ padding: '0.25rem 0.5rem', fontSize: '0.8rem' }}
+              onClick={() => fileInputRef.current?.click()}
+              disabled={scanning || generating}
+            >
+              {scanning ? "🔍 Scanning..." : "📸 Scan Fridge"}
+            </button>
+            <input 
+              type="file" 
+              accept="image/*" 
+              capture="environment" 
+              style={{ display: 'none' }} 
+              ref={fileInputRef}
+              onChange={handleImageUpload}
+            />
+          </div>
           <textarea
             id="fresh-ingredients-input"
             className="dialog-textarea"
@@ -76,6 +117,7 @@ export default function PlanDialog({
             value={freshIngredients}
             onChange={(e) => setFreshIngredients(e.target.value)}
             rows={4}
+            disabled={scanning || generating}
           />
 
           <div className="dialog-prefs-summary">

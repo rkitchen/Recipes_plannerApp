@@ -6,6 +6,7 @@ Prompt logic ported from the Streamlit components.py.
 import json
 import re
 from google import genai
+from google.genai import types
 from config import get_settings
 
 _client = None
@@ -119,3 +120,19 @@ def call_gemini(prompt: str, data: str, model: str = "gemini-2.5-flash") -> str:
         contents=[prompt, data],
     )
     return response.text
+
+def extract_ingredients_from_image(image_bytes: bytes, mime_type: str) -> str:
+    """
+    Sends an image to Gemini Vision to extract a comma-separated list of ingredients.
+    """
+    client = get_client()
+    prompt = "Identify the fresh ingredients or groceries visible in this image. Return a simple, comma-separated list of items with no extra text or markdown formatting."
+    
+    response = client.models.generate_content(
+        model="gemini-2.5-flash",
+        contents=[
+            prompt,
+            types.Part.from_bytes(data=image_bytes, mime_type=mime_type),
+        ],
+    )
+    return response.text.strip()

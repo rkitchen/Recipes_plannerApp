@@ -4,3 +4,4 @@ pydantic-settings>=2.7.0
 python-dotenv>=1.0.0
 firebase-admin>=7.4.0
 google-genai
+python-multipart>=0.0.18

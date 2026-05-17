@@ -84,6 +84,29 @@ export async function replaceMeal(
   });
 }
 
+export async function extractIngredientsVision(file: File): Promise<{ ingredients: string }> {
+  const token = await getAuthToken();
+  if (!token) throw new Error("No auth token available");
+
+  const formData = new FormData();
+  formData.append("file", file);
+
+  const res = await fetch(`${API_BASE}/api/meal-plan/vision`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+    body: formData,
+  });
+
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || "Vision extraction failed");
+  }
+
+  return res.json();
+}
+
 // ── Grocery List ────────────────────────────────────────────────────
 
 export async function generateGroceryList(

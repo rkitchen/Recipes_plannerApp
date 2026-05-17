@@ -3,7 +3,7 @@ Meal plans router — view, generate, and replace meal plans.
 """
 
 import re
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
 from middleware.auth import get_current_user
 from models import (
     MealPlanResponse, MealPlanDay,
@@ -13,7 +13,7 @@ from services.firestore import (
     get_recipes, get_meal_plan, save_meal_plan,
     update_meal_plan, get_user_profile,
 )
-from services.gemini import generate_meal_plan, replace_meal
+from services.gemini import generate_meal_plan, replace_meal, extract_ingredients_from_image
 
 router = APIRouter(prefix="/api/meal-plan", tags=["meal-plans"])
 
@@ -143,6 +143,25 @@ async def replace_day(
         raise
     except Exception as e:
         raise HTTPException(500, f"Replace failed: {e}")
+
+
+@router.post("/vision")
+async def vision_ingredients(
+    file: UploadFile = File(...),
+    user_uid: str = Depends(get_current_user),
+):
+    """
+    Accepts an image of a fridge/pantry and extracts fresh ingredients via Gemini.
+    """
+    if not file.content_type.startswith("image/"):
+        raise HTTPException(400, "Uploaded file must be an image.")
+
+    try:
+        image_bytes = await file.read()
+        extracted = extract_ingredients_from_image(image_bytes, file.content_type)
+        return {"ingredients": extracted}
+    except Exception as e:
+        raise HTTPException(500, f"Vision extraction failed: {e}")
 
 
 def _filter_recipes(
