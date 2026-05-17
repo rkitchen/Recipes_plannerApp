@@ -159,7 +159,7 @@ function RecipeTile({ recipe, isLiked, isDisliked, onRate, onTap }: RecipeTilePr
       ([entry]) => {
         if (entry.isIntersecting && !fetchedRef.current) {
           fetchedRef.current = true;
-          fetchRecipeImage(recipe.uid)
+          fetchRecipeImage(recipe.uid, 300)
             .then((res) => {
               if (res.photo_data) setImageData(res.photo_data);
             })

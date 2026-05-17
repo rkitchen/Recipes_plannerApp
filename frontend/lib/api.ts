@@ -58,8 +58,9 @@ export async function fetchRecipes(): Promise<RecipeSlim[]> {
   return apiFetch<RecipeSlim[]>("/api/recipes");
 }
 
-export async function fetchRecipeImage(uid: string): Promise<RecipeImage> {
-  return apiFetch<RecipeImage>(`/api/recipes/${uid}/image`);
+export async function fetchRecipeImage(uid: string, width?: number): Promise<RecipeImage> {
+  const params = width ? `?w=${width}` : "";
+  return apiFetch<RecipeImage>(`/api/recipes/${uid}/image${params}`);
 }
 
 export async function fetchRecipeDetail(uid: string): Promise<RecipeDetail> {
