@@ -7,6 +7,9 @@ venv/
 .venv/
 *.pyc
 
+# config
+config/*
+
 # Backend
 backend/.env
 backend/serviceAccount.json

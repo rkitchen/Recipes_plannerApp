@@ -59,8 +59,13 @@ Create a `.env` file in the `/backend` directory based on `.env.example`:
 ```env
 GEMINI_API_KEY="AIzaSy..."
 ALLOWED_ORIGINS="http://localhost:3000"
-# Use the encode_firebase_secret.py script to safely base64 encode your Firebase JSON key
 FIREBASE_SERVICE_ACCOUNT_JSON="<base64-encoded-string>" 
+```
+
+*Note: Because raw JSON can be tricky in environment variables (especially in GitHub Secrets), you must Base64-encode your downloaded Firebase Service Account JSON file. You can do this easily with the provided script:*
+```bash
+python scripts/encode_firebase_secret.py config/meal-planner-db-37b16-7402a4c6938b.json
+# Copy the resulting Base64 string into your .env file or GitHub Secrets
 ```
 
 **Run the Backend:**
