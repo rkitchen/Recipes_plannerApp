@@ -66,6 +66,35 @@ def get_recipe_image(uid: str) -> str | None:
     return None
 
 
+def get_recipe_detail(uid: str) -> dict | None:
+    """Return full recipe details for a single recipe, or None."""
+    db = get_db()
+    try:
+        doc = db.collection("recipes").document(uid).get()
+        if doc.exists:
+            r = doc.to_dict()
+            categories = r.get("categories", [])
+            if isinstance(categories, str):
+                categories = [c.strip() for c in categories.split(",") if c.strip()]
+            return {
+                "uid": r.get("uid", uid),
+                "name": r.get("name", "Unknown"),
+                "prep_time": str(r.get("prep_time", "")),
+                "cook_time": str(r.get("cook_time", "")),
+                "source_url": r.get("source_url", ""),
+                "ingredients": r.get("ingredients", ""),
+                "directions": r.get("directions", ""),
+                "servings": str(r.get("servings", "")),
+                "nutritional_info": r.get("nutritional_info", ""),
+                "notes": r.get("notes", ""),
+                "categories": categories,
+                "photo_data": r.get("photo_data"),
+            }
+    except Exception:
+        pass
+    return None
+
+
 def get_recipe_ingredients_batch(uids: list[str]) -> list[str]:
     """Fetch ingredient strings for a batch of recipe UIDs."""
     db = get_db()

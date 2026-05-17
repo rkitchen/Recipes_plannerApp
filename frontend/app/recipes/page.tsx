@@ -7,6 +7,7 @@
 
 import { useState, useEffect, useMemo } from "react";
 import { useAuth } from "@/components/AuthProvider";
+import RecipeSheet from "@/components/RecipeSheet";
 import {
   fetchRecipes,
   fetchRecipeImage,
@@ -21,6 +22,7 @@ export default function RecipesPage() {
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [search, setSearch] = useState("");
   const [loading, setLoading] = useState(true);
+  const [selectedUid, setSelectedUid] = useState<string | null>(null);
 
   useEffect(() => {
     if (!user) return;
@@ -117,10 +119,13 @@ export default function RecipesPage() {
               isLiked={profile?.liked.includes(recipe.uid) || false}
               isDisliked={profile?.disliked.includes(recipe.uid) || false}
               onRate={handleRating}
+              onTap={() => setSelectedUid(recipe.uid)}
             />
           ))}
         </div>
       )}
+
+      <RecipeSheet uid={selectedUid} onClose={() => setSelectedUid(null)} />
     </div>
   );
 }
@@ -135,9 +140,10 @@ interface RecipeTileProps {
     uid: string,
     type: "like" | "dislike" | "remove_like" | "remove_dislike"
   ) => Promise<void>;
+  onTap: () => void;
 }
 
-function RecipeTile({ recipe, isLiked, isDisliked, onRate }: RecipeTileProps) {
+function RecipeTile({ recipe, isLiked, isDisliked, onRate, onTap }: RecipeTileProps) {
   const [imageData, setImageData] = useState<string | null>(null);
   const [imageLoaded, setImageLoaded] = useState(false);
   const [ratingLoading, setRatingLoading] = useState(false);
@@ -150,20 +156,22 @@ function RecipeTile({ recipe, isLiked, isDisliked, onRate }: RecipeTileProps) {
       .catch(() => {});
   }, [recipe.uid]);
 
-  const handleLike = async () => {
+  const handleLike = async (e: React.MouseEvent) => {
+    e.stopPropagation();
     setRatingLoading(true);
     await onRate(recipe.uid, isLiked ? "remove_like" : "like");
     setRatingLoading(false);
   };
 
-  const handleDislike = async () => {
+  const handleDislike = async (e: React.MouseEvent) => {
+    e.stopPropagation();
     setRatingLoading(true);
     await onRate(recipe.uid, isDisliked ? "remove_dislike" : "dislike");
     setRatingLoading(false);
   };
 
   return (
-    <div className="recipe-tile" id={`recipe-tile-${recipe.uid}`}>
+    <div className="recipe-tile" id={`recipe-tile-${recipe.uid}`} onClick={onTap} style={{ cursor: "pointer" }}>
       <div className="recipe-tile-image">
         {imageData ? (
           <img

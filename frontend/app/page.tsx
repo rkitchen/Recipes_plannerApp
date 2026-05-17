@@ -10,6 +10,7 @@ import { useAuth } from "@/components/AuthProvider";
 import WeekCarousel from "@/components/WeekCarousel";
 import RecipeCard from "@/components/RecipeCard";
 import PlanDialog from "@/components/PlanDialog";
+import RecipeSheet from "@/components/RecipeSheet";
 import { fetchMealPlan, fetchRecipes, fetchUserProfile } from "@/lib/api";
 import type { MealPlanResponse, RecipeSlim, UserProfile } from "@/lib/types";
 
@@ -37,6 +38,7 @@ export default function MealsPage() {
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState(true);
   const [showPlanDialog, setShowPlanDialog] = useState(false);
+  const [selectedUid, setSelectedUid] = useState<string | null>(null);
 
   const recipeMap = recipes.reduce(
     (map, r) => ({ ...map, [r.uid]: r }),
@@ -104,6 +106,7 @@ export default function MealsPage() {
                 userDisliked={profile?.disliked || []}
                 isPast={isPast}
                 onPlanUpdated={loadData}
+                onViewRecipe={setSelectedUid}
               />
             );
           })}
@@ -131,6 +134,8 @@ export default function MealsPage() {
           onPlanGenerated={loadData}
         />
       )}
+
+      <RecipeSheet uid={selectedUid} onClose={() => setSelectedUid(null)} />
     </div>
   );
 }

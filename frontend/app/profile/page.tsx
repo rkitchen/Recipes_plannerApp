@@ -12,6 +12,7 @@ import {
   saveUserPreferences,
   updateRecipeRating,
 } from "@/lib/api";
+import RecipeSheet from "@/components/RecipeSheet";
 import type { UserProfile, RecipeSlim } from "@/lib/types";
 
 export default function ProfilePage() {
@@ -28,6 +29,7 @@ export default function ProfilePage() {
   const [nutritionInfo, setNutritionInfo] = useState("");
   const [pantryStaples, setPantryStaples] = useState("");
   const [mealPlanNotes, setMealPlanNotes] = useState("");
+  const [selectedUid, setSelectedUid] = useState<string | null>(null);
 
   const loadProfile = useCallback(async () => {
     if (!user) return;
@@ -220,7 +222,7 @@ export default function ProfilePage() {
               <ul className="ratings-list">
                 {[...profile.liked].sort((a, b) => uidToName(a).localeCompare(uidToName(b))).map((uid) => (
                   <li key={uid} className="ratings-item">
-                    <span>{uidToName(uid)}</span>
+                    <span className="ratings-item-name" onClick={() => setSelectedUid(uid)}>{uidToName(uid)}</span>
                     <button
                       className="ratings-remove"
                       onClick={() => handleRemoveRating(uid, "remove_like")}
@@ -242,7 +244,7 @@ export default function ProfilePage() {
               <ul className="ratings-list">
                 {[...profile.disliked].sort((a, b) => uidToName(a).localeCompare(uidToName(b))).map((uid) => (
                   <li key={uid} className="ratings-item">
-                    <span>{uidToName(uid)}</span>
+                    <span className="ratings-item-name" onClick={() => setSelectedUid(uid)}>{uidToName(uid)}</span>
                     <button
                       className="ratings-remove"
                       onClick={() => handleRemoveRating(uid, "remove_dislike")}
@@ -270,6 +272,8 @@ export default function ProfilePage() {
           🚪 Sign Out
         </button>
       </section>
+
+      <RecipeSheet uid={selectedUid} onClose={() => setSelectedUid(null)} />
     </div>
   );
 }

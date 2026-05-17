@@ -18,6 +18,7 @@ interface RecipeCardProps {
   userDisliked: string[];
   isPast: boolean;
   onPlanUpdated: () => void;
+  onViewRecipe?: (uid: string) => void;
 }
 
 export default function RecipeCard({
@@ -29,6 +30,7 @@ export default function RecipeCard({
   userDisliked,
   isPast,
   onPlanUpdated,
+  onViewRecipe,
 }: RecipeCardProps) {
   const [imageData, setImageData] = useState<string | null>(null);
   const [showReplace, setShowReplace] = useState(false);
@@ -100,7 +102,7 @@ export default function RecipeCard({
       id={`recipe-card-${dayIndex}`}
     >
       {/* Image */}
-      <div className="recipe-card-image">
+      <div className="recipe-card-image" onClick={() => onViewRecipe?.(uid)} style={{ cursor: "pointer" }}>
         {imageData ? (
           <img
             src={`data:image/jpeg;base64,${imageData}`}

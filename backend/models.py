@@ -17,6 +17,21 @@ class RecipeSlim(BaseModel):
     ingredients: str = ""
 
 
+class RecipeDetail(BaseModel):
+    uid: str
+    name: str
+    prep_time: str = ""
+    cook_time: str = ""
+    source_url: str = ""
+    ingredients: str = ""
+    directions: str = ""
+    servings: str = ""
+    nutritional_info: str = ""
+    notes: str = ""
+    categories: list[str] = []
+    photo_data: Optional[str] = None
+
+
 class RecipeImageResponse(BaseModel):
     uid: str
     photo_data: Optional[str] = None

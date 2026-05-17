@@ -18,6 +18,21 @@ export interface RecipeImage {
   photo_data: string | null;
 }
 
+export interface RecipeDetail {
+  uid: string;
+  name: string;
+  prep_time: string;
+  cook_time: string;
+  source_url: string;
+  ingredients: string;
+  directions: string;
+  servings: string;
+  nutritional_info: string;
+  notes: string;
+  categories: string[];
+  photo_data: string | null;
+}
+
 // ── Meal Plans ──────────────────────────────────────────────────────
 
 export interface MealPlanDay {

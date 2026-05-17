@@ -10,6 +10,7 @@ import { auth } from "./firebase";
 import type {
   RecipeSlim,
   RecipeImage,
+  RecipeDetail,
   MealPlanResponse,
   GeneratePlanRequest,
   ReplaceMealRequest,
@@ -59,6 +60,10 @@ export async function fetchRecipes(): Promise<RecipeSlim[]> {
 
 export async function fetchRecipeImage(uid: string): Promise<RecipeImage> {
   return apiFetch<RecipeImage>(`/api/recipes/${uid}/image`);
+}
+
+export async function fetchRecipeDetail(uid: string): Promise<RecipeDetail> {
+  return apiFetch<RecipeDetail>(`/api/recipes/${uid}`);
 }
 
 // ── Meal Plans ──────────────────────────────────────────────────────
