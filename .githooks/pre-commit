@@ -32,7 +32,7 @@ for pattern in "${PATTERNS[@]}"; do
         grep -v "^---" | grep -v "^+++" | \
         grep -E "^\+" | \
         grep -v -E "$EXCLUDE_PATTERNS" | \
-        grep -E "$pattern" || true)
+        grep -E -e "$pattern" || true)
 
     if [ -n "$MATCHES" ]; then
         echo -e "${RED}❌ BLOCKED: Potential secret detected matching pattern:${NC}"

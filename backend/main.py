@@ -3,6 +3,8 @@ FastAPI application entry point.
 
 Initialises Firebase Admin SDK and Gemini client at startup,
 configures CORS, and mounts all API routers.
+
+Last key rotation: 2026-05-17
 """
 
 from contextlib import asynccontextmanager
