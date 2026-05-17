@@ -21,6 +21,7 @@ import {
   type User,
 } from "firebase/auth";
 import { auth } from "@/lib/firebase";
+import { fetchUserProfile } from "@/lib/api";
 import { usePathname, useRouter } from "next/navigation";
 
 interface AuthContextType {
@@ -58,9 +59,7 @@ export default function AuthProvider({ children }: { children: ReactNode }) {
 
       if (u) {
         // Fire-and-forget profile fetch to ensure backend auto-provisions the Firestore document
-        import("@/lib/api").then(({ fetchUserProfile }) => {
-          fetchUserProfile().catch((err) => console.error("Failed to auto-provision user:", err));
-        });
+        fetchUserProfile().catch((err) => console.error("Failed to auto-provision user:", err));
       }
 
       if (!u && !PUBLIC_PATHS.includes(pathname)) {
