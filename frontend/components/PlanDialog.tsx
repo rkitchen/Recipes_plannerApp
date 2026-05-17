@@ -28,7 +28,8 @@ export default function PlanDialog({
   const [generating, setGenerating] = useState(false);
   const [scanning, setScanning] = useState(false);
   const [error, setError] = useState("");
-  const fileInputRef = useRef<HTMLInputElement>(null);
+  const cameraInputRef = useRef<HTMLInputElement>(null);
+  const galleryInputRef = useRef<HTMLInputElement>(null);
 
   if (!isOpen) return null;
 
@@ -70,7 +71,8 @@ export default function PlanDialog({
       setError(err.message || "Failed to scan image");
     } finally {
       setScanning(false);
-      if (fileInputRef.current) fileInputRef.current.value = "";
+      if (cameraInputRef.current) cameraInputRef.current.value = "";
+      if (galleryInputRef.current) galleryInputRef.current.value = "";
     }
   };
 
@@ -90,23 +92,41 @@ export default function PlanDialog({
           </p>
 
           <div className="dialog-label-row" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <label className="dialog-label" htmlFor="fresh-ingredients-input" style={{ marginBottom: 0 }}>
+            <label className="dialog-label" htmlFor="fresh-ingredients-input" style={{ marginBottom: 0, flex: 1 }}>
               Fresh ingredients available:
             </label>
-            <button 
-              className="btn btn--secondary" 
-              style={{ padding: '0.25rem 0.5rem', fontSize: '0.8rem' }}
-              onClick={() => fileInputRef.current?.click()}
-              disabled={scanning || generating}
-            >
-              {scanning ? "🔍 Scanning..." : "📸 Scan Fridge"}
-            </button>
+            <div style={{ display: 'flex', gap: '8px' }}>
+              <button 
+                className="btn btn--secondary" 
+                style={{ padding: '0.25rem 0.5rem', fontSize: '0.8rem' }}
+                onClick={() => galleryInputRef.current?.click()}
+                disabled={scanning || generating}
+              >
+                {scanning ? "🔍..." : "📁 Gallery"}
+              </button>
+              <button 
+                className="btn btn--secondary" 
+                style={{ padding: '0.25rem 0.5rem', fontSize: '0.8rem' }}
+                onClick={() => cameraInputRef.current?.click()}
+                disabled={scanning || generating}
+              >
+                {scanning ? "🔍 Scanning..." : "📸 Camera"}
+              </button>
+            </div>
+            
             <input 
               type="file" 
               accept="image/*" 
               capture="environment" 
               style={{ display: 'none' }} 
-              ref={fileInputRef}
+              ref={cameraInputRef}
+              onChange={handleImageUpload}
+            />
+            <input 
+              type="file" 
+              accept="image/*" 
+              style={{ display: 'none' }} 
+              ref={galleryInputRef}
               onChange={handleImageUpload}
             />
           </div>
