@@ -11,6 +11,7 @@ import { usePathname } from "next/navigation";
 const tabs = [
   { href: "/", label: "Meals", icon: "🍽️" },
   { href: "/grocery", label: "Grocery", icon: "🛒" },
+  { href: "/recipes", label: "Recipes", icon: "📖" },
   { href: "/profile", label: "Profile", icon: "👤" },
 ];
 
