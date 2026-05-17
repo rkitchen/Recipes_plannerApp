@@ -56,6 +56,13 @@ export default function AuthProvider({ children }: { children: ReactNode }) {
       setUser(u);
       setLoading(false);
 
+      if (u) {
+        // Fire-and-forget profile fetch to ensure backend auto-provisions the Firestore document
+        import("@/lib/api").then(({ fetchUserProfile }) => {
+          fetchUserProfile().catch((err) => console.error("Failed to auto-provision user:", err));
+        });
+      }
+
       if (!u && !PUBLIC_PATHS.includes(pathname)) {
         router.replace("/login");
       }
