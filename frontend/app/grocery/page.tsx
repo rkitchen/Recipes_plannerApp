@@ -13,6 +13,7 @@ import {
   fetchMealPlan,
   fetchUserProfile,
   generateGroceryList,
+  fetchGroceryList,
 } from "@/lib/api";
 import type { GroceryCategory } from "@/lib/types";
 
@@ -38,14 +39,18 @@ export default function GroceryPage() {
   const [hasPlan, setHasPlan] = useState<boolean | null>(null);
   const [isOffline, setIsOffline] = useState(false);
 
-  // Try loading cached grocery list on mount
+  const [initialCheckedItems, setInitialCheckedItems] = useState<string[]>([]);
+
+  // Load grocery list from database on mount
   useEffect(() => {
-    try {
-      const cached = localStorage.getItem("grocery-list-data");
-      if (cached) {
-        setCategories(JSON.parse(cached));
-      }
-    } catch {}
+    if (!user) return;
+    
+    fetchGroceryList()
+      .then((res) => {
+        setCategories(res.categories);
+        setInitialCheckedItems(res.checked_items);
+      })
+      .catch((err) => console.error("Failed to load grocery list:", err));
 
     // Check if offline
     const handleOnline = () => setIsOffline(false);
@@ -95,9 +100,7 @@ export default function GroceryPage() {
       });
 
       setCategories(result.categories);
-
-      // Clear old checked state for a fresh list
-      localStorage.removeItem("grocery-list-checked");
+      setInitialCheckedItems([]);
     } catch (e: any) {
       setError(e.message || "Failed to generate grocery list");
     } finally {
@@ -149,7 +152,10 @@ export default function GroceryPage() {
       )}
 
       {/* The grocery list */}
-      <GroceryList categories={categories} />
+      <GroceryList 
+        categories={categories} 
+        initialCheckedItems={initialCheckedItems} 
+      />
 
       {categories.length === 0 && !loading && (
         <div className="empty-state" id="no-grocery-state">

@@ -64,6 +64,11 @@ export interface GroceryListResponse {
   categories: GroceryCategory[];
 }
 
+export interface GroceryListStateResponse {
+  categories: GroceryCategory[];
+  checked_items: string[];
+}
+
 export interface GroceryListRequest {
   recipe_uids: string[];
   pantry_staples: string;

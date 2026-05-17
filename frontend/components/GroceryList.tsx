@@ -16,9 +16,11 @@
 import { useState, useEffect, useCallback } from "react";
 import type { GroceryCategory, GroceryItem } from "@/lib/types";
 
+import { updateGroceryChecks } from "@/lib/api";
+
 interface GroceryListProps {
   categories: GroceryCategory[];
-  storageKey?: string;
+  initialCheckedItems?: string[];
 }
 
 // Aisle emoji map for visual flair
@@ -34,36 +36,29 @@ const AISLE_ICONS: Record<string, string> = {
   "Other": "📦",
 };
 
-export default function GroceryList({ categories, storageKey = "grocery-list" }: GroceryListProps) {
-  // Initialise state from localStorage or from props
-  const [checkedItems, setCheckedItems] = useState<Set<string>>(() => {
-    if (typeof window === "undefined") return new Set();
-    try {
-      const saved = localStorage.getItem(`${storageKey}-checked`);
-      return saved ? new Set(JSON.parse(saved)) : new Set();
-    } catch {
-      return new Set();
-    }
-  });
-
+export default function GroceryList({ categories, initialCheckedItems = [] }: GroceryListProps) {
+  // Use a ref to track if we've initialized from props to avoid overwriting on first render
+  const [initialized, setInitialized] = useState(false);
+  const [checkedItems, setCheckedItems] = useState<Set<string>>(new Set());
   const [collapsedCategories, setCollapsedCategories] = useState<Set<string>>(new Set());
 
-  // Persist checked state to localStorage
+  // Initialize state from props once they arrive
   useEffect(() => {
-    try {
-      localStorage.setItem(
-        `${storageKey}-checked`,
-        JSON.stringify([...checkedItems])
-      );
-    } catch {}
-  }, [checkedItems, storageKey]);
+    if (!initialized && initialCheckedItems.length >= 0) {
+      setCheckedItems(new Set(initialCheckedItems));
+      setInitialized(true);
+    }
+  }, [initialCheckedItems, initialized]);
 
-  // Save the full grocery list to localStorage for offline access
+  // Sync checked state to backend whenever it changes (debounced by React state batching)
   useEffect(() => {
-    try {
-      localStorage.setItem(`${storageKey}-data`, JSON.stringify(categories));
-    } catch {}
-  }, [categories, storageKey]);
+    if (!initialized) return;
+    
+    // We do a "fire and forget" sync to the backend
+    updateGroceryChecks(Array.from(checkedItems)).catch((err) =>
+      console.error("Failed to sync grocery checks", err)
+    );
+  }, [checkedItems, initialized]);
 
   // Generate a unique key for each item
   const itemKey = (categoryName: string, itemName: string) =>

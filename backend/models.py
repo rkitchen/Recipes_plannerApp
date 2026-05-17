@@ -73,6 +73,15 @@ class GroceryListResponse(BaseModel):
     categories: list[GroceryCategory]
 
 
+class GroceryListStateResponse(BaseModel):
+    categories: list[GroceryCategory] = []
+    checked_items: list[str] = []
+
+
+class GroceryListSyncRequest(BaseModel):
+    checked_items: list[str]
+
+
 # ── Users ────────────────────────────────────────────────────────────────
 
 class UserPreferences(BaseModel):

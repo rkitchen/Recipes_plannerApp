@@ -15,6 +15,7 @@ import type {
   ReplaceMealRequest,
   GroceryListRequest,
   GroceryListResponse,
+  GroceryListStateResponse,
   UserProfile,
   UserPreferences,
   RatingUpdate,
@@ -91,6 +92,17 @@ export async function generateGroceryList(
   return apiFetch<GroceryListResponse>("/api/grocery-list", {
     method: "POST",
     body: JSON.stringify(req),
+  });
+}
+
+export async function fetchGroceryList(): Promise<GroceryListStateResponse> {
+  return apiFetch<GroceryListStateResponse>("/api/grocery-list");
+}
+
+export async function updateGroceryChecks(checkedKeys: string[]): Promise<void> {
+  await apiFetch("/api/grocery-list/checks", {
+    method: "PUT",
+    body: JSON.stringify({ checked_items: checkedKeys }),
   });
 }
 

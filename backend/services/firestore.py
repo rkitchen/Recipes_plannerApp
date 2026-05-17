@@ -131,6 +131,44 @@ def update_meal_plan(doc_id: str, new_plan_data: list) -> None:
     })
 
 
+# ── Grocery Lists ────────────────────────────────────────────────────────
+
+def get_grocery_list(user_id: str) -> tuple[list, list]:
+    """Returns (categories, checked_items)."""
+    db = get_db()
+    if not user_id:
+        return [], []
+    try:
+        doc = db.collection("grocery_lists").document(user_id).get()
+        if doc.exists:
+            d = doc.to_dict()
+            return d.get("categories", []), d.get("checked_items", [])
+    except Exception:
+        pass
+    return [], []
+
+def save_grocery_list(user_id: str, categories: list) -> None:
+    """Completely replace the active grocery list and clear checked items."""
+    db = get_db()
+    if not user_id:
+        return
+    db.collection("grocery_lists").document(user_id).set({
+        "categories": categories,
+        "checked_items": [],
+        "datestamp": firestore.SERVER_TIMESTAMP,
+    })
+
+def update_grocery_list_checks(user_id: str, checked_items: list) -> None:
+    """Update only the checked items array."""
+    db = get_db()
+    if not user_id:
+        return
+    db.collection("grocery_lists").document(user_id).set({
+        "checked_items": checked_items,
+        "datestamp": firestore.SERVER_TIMESTAMP,
+    }, merge=True)
+
+
 # ── Users ────────────────────────────────────────────────────────────────
 
 def get_user_profile(user_id: str) -> dict:
@@ -140,7 +178,8 @@ def get_user_profile(user_id: str) -> dict:
     if not user_id:
         return empty
     try:
-        doc = db.collection("users").document(user_id).get()
+        doc_ref = db.collection("users").document(user_id)
+        doc = doc_ref.get()
         if doc.exists:
             d = doc.to_dict()
             return {
@@ -148,7 +187,22 @@ def get_user_profile(user_id: str) -> dict:
                 "disliked": d.get("disliked_recipes", []),
                 "preferences": d.get("preferences", {}),
             }
-        return empty
+        else:
+            # Auto-provision new user on first fetch
+            from firebase_admin import auth
+            try:
+                user_record = auth.get_user(user_id)
+                email = user_record.email
+            except Exception:
+                email = "unknown"
+            
+            doc_ref.set({
+                "email": email,
+                "liked_recipes": [],
+                "disliked_recipes": [],
+                "preferences": {}
+            })
+            return empty
     except Exception:
         return empty
 
