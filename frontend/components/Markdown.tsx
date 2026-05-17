@@ -51,7 +51,7 @@ export default function Markdown({ text }: MarkdownProps) {
 
   const parseInline = (lineText: string): React.ReactNode => {
     // Inline parser for bold (**text**), italic (*text*), and links ([text](url))
-    let parts: React.ReactNode[] = [lineText];
+    let parts: (string | React.JSX.Element)[] = [lineText];
 
     // 1. Bold: **bold**
     parts = parts.flatMap((part) => {
@@ -93,7 +93,7 @@ export default function Markdown({ text }: MarkdownProps) {
     parts = parts.flatMap((part) => {
       if (typeof part !== "string") return [part];
       const linkRegex = /\[([^\]]+)\]\(([^)]+)\)/g;
-      const subParts: React.ReactNode[] = [];
+      const subParts: (string | React.JSX.Element)[] = [];
       let lastIndex = 0;
       let match;
 
