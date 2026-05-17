@@ -27,6 +27,7 @@ export default function ProfilePage() {
   const [caloriesGoal, setCaloriesGoal] = useState(2000);
   const [nutritionInfo, setNutritionInfo] = useState("");
   const [pantryStaples, setPantryStaples] = useState("");
+  const [mealPlanNotes, setMealPlanNotes] = useState("");
 
   const loadProfile = useCallback(async () => {
     if (!user) return;
@@ -44,6 +45,7 @@ export default function ProfilePage() {
       setCaloriesGoal(prof.preferences.calories_goal || 2000);
       setNutritionInfo(prof.preferences.nutrition_info || "");
       setPantryStaples(prof.preferences.pantry_staples || "");
+      setMealPlanNotes(prof.preferences.meal_plan_notes || "");
     } catch (e) {
       console.error("Failed to load profile:", e);
     } finally {
@@ -64,6 +66,7 @@ export default function ProfilePage() {
         calories_goal: caloriesGoal,
         nutrition_info: nutritionInfo,
         pantry_staples: pantryStaples,
+        meal_plan_notes: mealPlanNotes,
       });
       setSaved(true);
       setTimeout(() => setSaved(false), 2000);
@@ -171,6 +174,20 @@ export default function ProfilePage() {
               placeholder="olive oil, salt, pepper, flour..."
               value={pantryStaples}
               onChange={(e) => setPantryStaples(e.target.value)}
+              rows={3}
+            />
+          </div>
+
+          <div className="form-group form-group--full">
+            <label className="form-label" htmlFor="meal-notes-input">
+              Meal Plan Preferences
+            </label>
+            <textarea
+              id="meal-notes-input"
+              className="form-textarea"
+              placeholder="e.g., We love Mediterranean food, prefer quick weeknight meals under 30 min, would like at least one vegetarian day..."
+              value={mealPlanNotes}
+              onChange={(e) => setMealPlanNotes(e.target.value)}
               rows={3}
             />
           </div>

@@ -81,6 +81,7 @@ export interface UserPreferences {
   calories_goal: number;
   nutrition_info: string;
   pantry_staples: string;
+  meal_plan_notes: string;
 }
 
 export interface UserProfile {

@@ -89,6 +89,7 @@ class UserPreferences(BaseModel):
     calories_goal: int = 2000
     nutrition_info: str = ""
     pantry_staples: str = ""
+    meal_plan_notes: str = ""
 
 
 class UserProfile(BaseModel):

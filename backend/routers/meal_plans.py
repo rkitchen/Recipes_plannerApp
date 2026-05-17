@@ -50,7 +50,7 @@ async def generate_plan(
 
     # Build inventory string
     inventory_payload = (
-        f"Fresh Ingredients: {req.fresh_ingredients}\n"
+        f"Fresh Ingredients: {req.fresh_ingredients}\n\n"
         f"Assumed staples: {req.pantry_staples}"
     )
 
@@ -58,14 +58,20 @@ async def generate_plan(
     filtered = _filter_recipes(filtered, inventory_payload, max_recipes=150)
 
     liked_names = [r["name"] for r in all_recipes if r["uid"] in liked_uids]
+    disliked_names = [r["name"] for r in all_recipes if r["uid"] in disliked_uids]
+
+    prefs = profile.get("preferences", {})
+    meal_plan_notes = prefs.get("meal_plan_notes", "")
 
     plan_data = generate_meal_plan(
         recipes=filtered,
         inventory=inventory_payload,
         liked_names=liked_names,
+        disliked_names=disliked_names,
         meal_type=req.meal_type,
         calories_goal=req.calories_goal,
         nutrition_info=req.nutrition_info,
+        meal_plan_notes=meal_plan_notes,
     )
 
     doc_id = save_meal_plan(

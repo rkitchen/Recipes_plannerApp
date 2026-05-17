@@ -42,9 +42,11 @@ def generate_meal_plan(
     recipes: list[dict],
     inventory: str,
     liked_names: list[str],
+    disliked_names: list[str] | None = None,
     meal_type: str = "Main Only",
     calories_goal: int = 2000,
     nutrition_info: str = "",
+    meal_plan_notes: str = "",
 ) -> list[dict]:
     """
     Generate a 5-day meal plan using Gemini 2.5 Pro.
@@ -55,25 +57,47 @@ def generate_meal_plan(
     liked_injection = ""
     if liked_names:
         liked_injection = (
-            f"\nThe user loves these: {', '.join(liked_names)}. "
-            "Prioritize matching ingredients to these if possible."
+            f"\nFavourite recipes: {', '.join(liked_names)}. "
+            "Try and include a recipe that is similar to one of these if possible."
         )
+
+    disliked_injection = ""
+    if disliked_names:
+        disliked_injection = (
+            f"\nDisliked recipes (NEVER suggest these): {', '.join(disliked_names)}."
+        )
+
+    notes_injection = ""
+    if meal_plan_notes:
+        notes_injection = f"\nUser preferences: {meal_plan_notes}"
 
     slim = [{"uid": r["uid"], "name": r["name"], "prep_time": r.get("prep_time", "")} for r in recipes]
 
-    system_instruction = f"""You are an intelligent, agentic meal planner.
+    system_instruction = f"""You are an intelligent and creative personal chef. You are acting as an agentic meal planner.
+
 Inventory:
 {inventory}
 {liked_injection}
+{disliked_injection}
+{notes_injection}
 
 Constraints:
 - Structure: {meal_type}
-- Target: {calories_goal} kcal
+- Target: {calories_goal} kcal/day
 - Other criteria: {nutrition_info}
 
-Task: Output a 5-day weekday meal plan (Monday to Friday). Focus on the inventory but include meats/other ingredients.
-Output STRICT valid JSON ONLY. Format:
-[ {{"day": "Monday", "recipe_uid": "UID", "reasoning": "Brief reason"}}, ... ]"""
+Rules:
+- You MUST only select recipes from the provided recipe list below — do not invent recipes.
+- Prioritise using the fresh ingredients before they spoil; supplement with pantry staples and additional ingredients as needed.
+- The user can easily purchase meat or fish despite not appearing in the inventory.
+- Ensure variety across the week: avoid repeating proteins, cuisines, or cooking styles on consecutive days.
+- Each day's "reasoning" should briefly explain why the recipe was chosen (e.g. which fresh ingredients it uses).
+
+Task:
+Output a 5-day weekday meal plan (Monday to Friday).
+Output STRICT valid JSON ONLY — no markdown, no commentary. Format:
+[ {{"day": "Monday", "recipe_uid": "UID", "reasoning": "Brief reason"}}, ... ]
+"""
 
     response = client.models.generate_content(
         model="gemini-2.5-pro",
