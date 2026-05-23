@@ -16,20 +16,7 @@ import {
   fetchGroceryList,
 } from "@/lib/api";
 import type { GroceryCategory } from "@/lib/types";
-
-function getTargetWeek(): string {
-  const today = new Date();
-  const day = today.getDay();
-  if (day === 0 || day === 6) {
-    const daysAhead = day === 0 ? 1 : 2;
-    const next = new Date(today);
-    next.setDate(today.getDate() + daysAhead);
-    return next.toISOString().split("T")[0];
-  }
-  const monday = new Date(today);
-  monday.setDate(today.getDate() - (day - 1));
-  return monday.toISOString().split("T")[0];
-}
+import { getTargetWeek } from "@/lib/dateUtils";
 
 export default function GroceryPage() {
   const { user } = useAuth();

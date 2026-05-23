@@ -13,26 +13,11 @@ import PlanDialog from "@/components/PlanDialog";
 import RecipeSheet from "@/components/RecipeSheet";
 import { fetchMealPlan, fetchRecipes, fetchUserProfile } from "@/lib/api";
 import type { MealPlanResponse, RecipeSlim, UserProfile } from "@/lib/types";
-
-function getTargetWeek(): string {
-  const today = new Date();
-  const day = today.getDay(); // 0=Sun, 1=Mon, ..., 6=Sat
-  if (day === 0 || day === 6) {
-    // Weekend: show next Monday
-    const daysAhead = day === 0 ? 1 : 2;
-    const next = new Date(today);
-    next.setDate(today.getDate() + daysAhead);
-    return next.toISOString().split("T")[0];
-  }
-  // Weekday: show this Monday
-  const monday = new Date(today);
-  monday.setDate(today.getDate() - (day - 1));
-  return monday.toISOString().split("T")[0];
-}
+import { getTargetWeek } from "@/lib/dateUtils";
 
 export default function MealsPage() {
   const { user } = useAuth();
-  const [weekStart, setWeekStart] = useState(getTargetWeek);
+  const [weekStart, setWeekStart] = useState(() => getTargetWeek());
   const [plan, setPlan] = useState<MealPlanResponse | null>(null);
   const [recipes, setRecipes] = useState<RecipeSlim[]>([]);
   const [profile, setProfile] = useState<UserProfile | null>(null);

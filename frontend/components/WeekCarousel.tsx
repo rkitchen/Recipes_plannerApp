@@ -4,15 +4,11 @@
  * WeekCarousel — previous/next week navigation with current week display.
  */
 
+import { shiftWeek } from "@/lib/dateUtils";
+
 interface WeekCarouselProps {
   weekStart: string; // YYYY-MM-DD
   onWeekChange: (newWeekStart: string) => void;
-}
-
-function shiftWeek(dateStr: string, weeks: number): string {
-  const d = new Date(dateStr + "T00:00:00");
-  d.setDate(d.getDate() + weeks * 7);
-  return d.toISOString().split("T")[0];
 }
 
 function formatWeekLabel(dateStr: string): string {
