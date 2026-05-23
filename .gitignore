@@ -28,3 +28,4 @@ frontend/public/workbox-*.js.map
 .DS_Store
 *.paprikarecipes
 uv.lock
+*.tsbuildinfo
